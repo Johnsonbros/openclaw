@@ -245,6 +245,85 @@ export type OutboundCallOptions = {
 };
 
 // -----------------------------------------------------------------------------
+// SMS Types
+// -----------------------------------------------------------------------------
+
+/** Internal SMS message identifier (UUID) */
+export type SmsId = string;
+
+/** Provider-specific message identifier (e.g. Twilio MessageSid) */
+export type ProviderMessageId = string;
+
+export type SendSmsInput = {
+  /** Phone number to send from (E.164) */
+  from: string;
+  /** Phone number to send to (E.164) */
+  to: string;
+  /** Message body */
+  body: string;
+  /** Optional media URLs (MMS) */
+  mediaUrls?: string[];
+  /** Optional status callback URL */
+  statusCallbackUrl?: string;
+};
+
+export type SendSmsResult = {
+  /** Provider message ID (e.g. Twilio SM...) */
+  messageId: ProviderMessageId;
+  /** Delivery status */
+  status: "queued" | "sent" | "failed";
+};
+
+export type InboundSmsEvent = {
+  /** Provider message ID */
+  messageId: string;
+  /** Sender phone number (E.164) */
+  from: string;
+  /** Recipient phone number (E.164) */
+  to: string;
+  /** Message text */
+  body: string;
+  /** Media attachment URLs (MMS) */
+  mediaUrls: string[];
+  /** When received */
+  receivedAt: number;
+};
+
+export type SmsDeliveryEvent = {
+  /** Provider message ID */
+  messageId: string;
+  /** Delivery status */
+  status: "sent" | "delivered" | "undelivered" | "failed";
+  /** Error code if failed */
+  errorCode?: string;
+};
+
+export type SmsRecord = {
+  /** Internal ID */
+  id: string;
+  /** Provider message ID */
+  providerMessageId?: string;
+  /** Direction */
+  direction: "inbound" | "outbound";
+  /** Sender */
+  from: string;
+  /** Recipient */
+  to: string;
+  /** Message body */
+  body: string;
+  /** Media URLs */
+  mediaUrls: string[];
+  /** Status */
+  status: "queued" | "sent" | "delivered" | "failed" | "received";
+  /** Created timestamp */
+  createdAt: number;
+  /** Updated timestamp */
+  updatedAt: number;
+  /** Error info */
+  error?: string;
+};
+
+// -----------------------------------------------------------------------------
 // Tool Result Types
 // -----------------------------------------------------------------------------
 

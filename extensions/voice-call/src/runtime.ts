@@ -1,4 +1,5 @@
 import type { VoiceCallConfig } from "./config.js";
+import { ContactProfileStore } from "./contact-profile.js";
 import type { CoreConfig } from "./core-bridge.js";
 import type { VoiceCallProvider } from "./providers/base.js";
 import type { TelephonyTtsRuntime } from "./telephony-tts.js";
@@ -23,6 +24,7 @@ export type VoiceCallRuntime = {
   webhookServer: VoiceCallWebhookServer;
   webhookUrl: string;
   publicUrl: string | null;
+  contactStore: ContactProfileStore;
   stop: () => Promise<void>;
 };
 
@@ -114,6 +116,14 @@ export async function createVoiceCallRuntime(params: {
   const manager = new CallManager(config);
   const webhookServer = new VoiceCallWebhookServer(config, manager, provider, coreConfig);
 
+  // Initialize contact profile store for cross-channel identity tracking
+  const contactStore = new ContactProfileStore();
+  webhookServer.setContactStore(contactStore);
+
+  if (config.sms?.enabled) {
+    log.info("[voice-call/sms] SMS enabled — contact profile store initialized");
+  }
+
   const localUrl = await webhookServer.start();
 
   // Determine public URL - priority: config.publicUrl > tunnel > legacy tailscale
@@ -199,6 +209,7 @@ export async function createVoiceCallRuntime(params: {
     webhookServer,
     webhookUrl,
     publicUrl,
+    contactStore,
     stop,
   };
 }

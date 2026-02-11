@@ -2,12 +2,13 @@ import { spawn } from "node:child_process";
 import http from "node:http";
 import { URL } from "node:url";
 import type { VoiceCallConfig } from "./config.js";
+import type { ContactProfileStore } from "./contact-profile.js";
 import type { CoreConfig } from "./core-bridge.js";
 import type { CallManager } from "./manager.js";
 import type { MediaStreamConfig } from "./media-stream.js";
 import type { VoiceCallProvider } from "./providers/base.js";
 import type { TwilioProvider } from "./providers/twilio.js";
-import type { NormalizedEvent, WebhookContext } from "./types.js";
+import type { NormalizedEvent, SmsRecord, WebhookContext } from "./types.js";
 import { MediaStreamHandler } from "./media-stream.js";
 import { OpenAIRealtimeSTTProvider } from "./providers/stt-openai-realtime.js";
 
@@ -25,6 +26,12 @@ export class VoiceCallWebhookServer {
   /** Media stream handler for bidirectional audio (when streaming enabled) */
   private mediaStreamHandler: MediaStreamHandler | null = null;
 
+  /** Contact profile store for cross-channel identity */
+  private contactStore: ContactProfileStore | null = null;
+
+  /** SMS conversation history keyed by normalized phone number */
+  private smsHistory = new Map<string, Array<{ role: "user" | "assistant"; text: string }>>();
+
   constructor(
     config: VoiceCallConfig,
     manager: CallManager,
@@ -40,6 +47,13 @@ export class VoiceCallWebhookServer {
     if (config.streaming?.enabled) {
       this.initializeMediaStreaming();
     }
+  }
+
+  /**
+   * Set the contact profile store (injected from runtime).
+   */
+  setContactStore(store: ContactProfileStore): void {
+    this.contactStore = store;
   }
 
   /**
@@ -145,10 +159,21 @@ export class VoiceCallWebhookServer {
    */
   async start(): Promise<string> {
     const { port, bind, path: webhookPath } = this.config.serve;
+    const smsPath = this.config.sms?.webhookPath || "/sms/webhook";
     const streamPath = this.config.streaming?.streamPath || "/voice/stream";
 
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => {
+        const url = new URL(req.url || "/", `http://${req.headers.host}`);
+        // Route to SMS handler if path matches SMS webhook
+        if (url.pathname.startsWith(smsPath)) {
+          this.handleSmsRequest(req, res, smsPath).catch((err) => {
+            console.error("[voice-call/sms] Webhook error:", err);
+            res.statusCode = 500;
+            res.end("Internal Server Error");
+          });
+          return;
+        }
         this.handleRequest(req, res, webhookPath).catch((err) => {
           console.error("[voice-call] Webhook error:", err);
           res.statusCode = 500;
@@ -175,6 +200,9 @@ export class VoiceCallWebhookServer {
       this.server.listen(port, bind, () => {
         const url = `http://${bind}:${port}${webhookPath}`;
         console.log(`[voice-call] Webhook server listening on ${url}`);
+        if (this.config.sms?.enabled) {
+          console.log(`[voice-call/sms] SMS webhook on http://${bind}:${port}${smsPath}`);
+        }
         if (this.mediaStreamHandler) {
           console.log(`[voice-call] Media stream WebSocket on ws://${bind}:${port}${streamPath}`);
         }
@@ -323,6 +351,241 @@ export class VoiceCallWebhookServer {
       }
     } catch (err) {
       console.error(`[voice-call] Auto-response error:`, err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // SMS Webhook Handling
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Handle incoming SMS webhook requests.
+   * Twilio POSTs form-encoded data for inbound messages and delivery statuses.
+   */
+  private async handleSmsRequest(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    smsPath: string,
+  ): Promise<void> {
+    const url = new URL(req.url || "/", `http://${req.headers.host}`);
+
+    if (!url.pathname.startsWith(smsPath)) {
+      res.statusCode = 404;
+      res.end("Not Found");
+      return;
+    }
+
+    if (req.method !== "POST") {
+      res.statusCode = 405;
+      res.end("Method Not Allowed");
+      return;
+    }
+
+    const body = await this.readBody(req);
+
+    const ctx: WebhookContext = {
+      headers: req.headers as Record<string, string | string[] | undefined>,
+      rawBody: body,
+      url: `http://${req.headers.host}${req.url}`,
+      method: "POST",
+      query: Object.fromEntries(url.searchParams),
+      remoteAddress: req.socket.remoteAddress ?? undefined,
+    };
+
+    // Verify webhook signature (same HMAC-SHA1 as voice)
+    const verification = this.provider.verifyWebhook(ctx);
+    if (!verification.ok) {
+      console.warn(`[voice-call/sms] Webhook verification failed: ${verification.reason}`);
+      res.statusCode = 401;
+      res.end("Unauthorized");
+      return;
+    }
+
+    // Parse SMS event
+    if (!this.provider.parseSmsWebhookEvent) {
+      res.statusCode = 501;
+      res.end("SMS not supported by provider");
+      return;
+    }
+
+    const smsEvent = this.provider.parseSmsWebhookEvent(ctx);
+    if (!smsEvent) {
+      // Not an SMS event (or unrecognized format)
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/xml");
+      res.end('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+      return;
+    }
+
+    // Handle delivery status
+    if (smsEvent.delivery) {
+      console.log(
+        `[voice-call/sms] Delivery status: ${smsEvent.delivery.messageId} → ${smsEvent.delivery.status}`,
+      );
+      // Respond with empty TwiML
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/xml");
+      res.end('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+      return;
+    }
+
+    // Handle inbound SMS
+    if (smsEvent.inbound) {
+      const { from, to, body: msgBody, messageId, mediaUrls } = smsEvent.inbound;
+      console.log(`[voice-call/sms] Inbound SMS from ${from}: "${msgBody}"`);
+
+      // Check inbound policy
+      const smsConfig = this.config.sms;
+      if (!this.shouldAcceptSms(from)) {
+        console.log(`[voice-call/sms] SMS from ${from} rejected by policy`);
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "application/xml");
+        res.end('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+        return;
+      }
+
+      // Resolve or create contact profile
+      const profile = this.contactStore?.ensureContactForPhone(from, "sms");
+      const isOwner = this.contactStore?.isOwner(from, smsConfig?.ownerNumber);
+
+      // Auto-set admin role for owner number on first contact
+      if (isOwner && profile && profile.role === "unknown") {
+        this.contactStore?.updateProfile(profile.id, { role: "admin" });
+        profile.role = "admin";
+      }
+
+      if (profile) {
+        console.log(
+          `[voice-call/sms] Contact: ${profile.name} (${profile.role})${isOwner ? " [OWNER]" : ""}`,
+        );
+      }
+
+      // Track conversation history for this phone number
+      const normalizedPhone = from.replace(/\D/g, "");
+      const history = this.smsHistory.get(normalizedPhone) ?? [];
+      history.push({ role: "user", text: msgBody });
+      // Keep last 20 messages
+      if (history.length > 20) history.splice(0, history.length - 20);
+      this.smsHistory.set(normalizedPhone, history);
+
+      // Generate auto-reply via embedded agent
+      await this.handleSmsAutoReply(from, msgBody, profile ?? null, history);
+
+      // Respond with empty TwiML (reply sent via API, not inline)
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/xml");
+      res.end('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+      return;
+    }
+
+    res.statusCode = 200;
+    res.end("OK");
+  }
+
+  /**
+   * Check if inbound SMS should be accepted (mirrors voice call policy).
+   */
+  private shouldAcceptSms(from: string): boolean {
+    const smsConfig = this.config.sms;
+    if (!smsConfig?.enabled) return false;
+
+    const policy = smsConfig.inboundPolicy;
+    const allowFrom = smsConfig.allowFrom ?? [];
+
+    // Owner number always gets through
+    if (this.contactStore?.isOwner(from, smsConfig.ownerNumber)) {
+      return true;
+    }
+
+    switch (policy) {
+      case "disabled":
+        return false;
+      case "open":
+        return true;
+      case "allowlist":
+      case "pairing": {
+        const normalized = from.replace(/\D/g, "");
+        return allowFrom.some((num) => {
+          const normalizedAllow = num.replace(/\D/g, "");
+          return normalized.endsWith(normalizedAllow) || normalizedAllow.endsWith(normalized);
+        });
+      }
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Generate an auto-reply to an inbound SMS and send it back via the provider.
+   */
+  private async handleSmsAutoReply(
+    from: string,
+    message: string,
+    profile: import("./contact-profile.js").ContactProfile | null,
+    history: Array<{ role: "user" | "assistant"; text: string }>,
+  ): Promise<void> {
+    if (!this.coreConfig) {
+      console.warn("[voice-call/sms] Core config missing; skipping auto-reply");
+      return;
+    }
+
+    if (!this.provider.supportsSms?.() || !this.provider.sendSms) {
+      console.warn("[voice-call/sms] Provider does not support SMS send");
+      return;
+    }
+
+    const smsConfig = this.config.sms ?? { enabled: false } as any;
+
+    try {
+      const { generateSmsResponse } = await import("./sms-response-generator.js");
+
+      const result = await generateSmsResponse({
+        voiceConfig: this.config,
+        smsConfig,
+        coreConfig: this.coreConfig,
+        from,
+        message,
+        profile,
+        history,
+      });
+
+      if (result.error) {
+        console.error(`[voice-call/sms] Response generation error: ${result.error}`);
+        return;
+      }
+
+      if (result.text) {
+        console.log(`[voice-call/sms] AI reply to ${from}: "${result.text}"`);
+
+        const fromNumber = this.config.fromNumber;
+        if (!fromNumber) {
+          console.error("[voice-call/sms] No fromNumber configured; cannot reply");
+          return;
+        }
+
+        await this.provider.sendSms({
+          from: fromNumber,
+          to: from,
+          body: result.text,
+        });
+
+        // Track assistant reply in history
+        const normalizedPhone = from.replace(/\D/g, "");
+        const hist = this.smsHistory.get(normalizedPhone) ?? [];
+        hist.push({ role: "assistant", text: result.text });
+        this.smsHistory.set(normalizedPhone, hist);
+
+        // Append interaction note to contact profile
+        if (profile && this.contactStore) {
+          this.contactStore.addNote(
+            profile.id,
+            "sms",
+            `Sent: "${message}" → Reply: "${result.text.slice(0, 100)}${result.text.length > 100 ? "…" : ""}"`,
+          );
+        }
+      }
+    } catch (err) {
+      console.error("[voice-call/sms] Auto-reply error:", err);
     }
   }
 }

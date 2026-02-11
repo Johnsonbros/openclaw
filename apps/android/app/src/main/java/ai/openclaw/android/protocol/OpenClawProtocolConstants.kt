@@ -7,6 +7,7 @@ enum class OpenClawCapability(val rawValue: String) {
   Sms("sms"),
   VoiceWake("voiceWake"),
   Location("location"),
+  Pendant("pendant"),
 }
 
 enum class OpenClawCanvasCommand(val rawValue: String) {
@@ -67,5 +68,19 @@ enum class OpenClawLocationCommand(val rawValue: String) {
 
   companion object {
     const val NamespacePrefix: String = "location."
+  }
+}
+
+enum class OpenClawPendantCommand(val rawValue: String) {
+  Scan("pendant.scan"),
+  Connect("pendant.connect"),
+  Disconnect("pendant.disconnect"),
+  Status("pendant.status"),
+  StartStream("pendant.audio.start"),
+  StopStream("pendant.audio.stop"),
+  ;
+
+  companion object {
+    const val NamespacePrefix: String = "pendant."
   }
 }

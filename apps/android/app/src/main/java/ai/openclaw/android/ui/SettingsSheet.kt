@@ -64,6 +64,7 @@ import ai.openclaw.android.MainViewModel
 import ai.openclaw.android.NodeForegroundService
 import ai.openclaw.android.VoiceWakeMode
 import ai.openclaw.android.WakeWords
+import ai.openclaw.android.pendant.PendantConnectionState
 
 @Composable
 fun SettingsSheet(viewModel: MainViewModel) {
@@ -88,6 +89,15 @@ fun SettingsSheet(viewModel: MainViewModel) {
   val remoteAddress by viewModel.remoteAddress.collectAsState()
   val gateways by viewModel.gateways.collectAsState()
   val discoveryStatusText by viewModel.discoveryStatusText.collectAsState()
+
+  // Pendant state
+  val pendantDiscoveredDevices by viewModel.pendantDiscoveredDevices.collectAsState()
+  val pendantIsScanning by viewModel.pendantIsScanning.collectAsState()
+  val pendantConnectionState by viewModel.pendantConnectionState.collectAsState()
+  val pendantStatusText by viewModel.pendantStatusText.collectAsState()
+  val pendantActivePendant by viewModel.pendantActivePendant.collectAsState()
+  val pendantBatteryLevel by viewModel.pendantBatteryLevel.collectAsState()
+  val pendantIsStreaming by viewModel.pendantIsStreaming.collectAsState()
 
   val listState = rememberLazyListState()
   val (wakeWordsText, setWakeWordsText) = remember { mutableStateOf("") }
@@ -523,6 +533,84 @@ fun SettingsSheet(viewModel: MainViewModel) {
         } else {
           "Connect to a gateway to sync wake words globally."
         },
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+    }
+
+    item { HorizontalDivider() }
+
+    // Pendant
+    item { Text("Pendant", style = MaterialTheme.typography.titleSmall) }
+    item {
+      val pendantConnected = pendantConnectionState == PendantConnectionState.CONNECTED ||
+                             pendantConnectionState == PendantConnectionState.STREAMING
+      ListItem(
+        headlineContent = { Text("BLE Pendant") },
+        supportingContent = { Text(pendantStatusText) },
+        trailingContent = {
+          if (pendantConnected) {
+            Button(onClick = { viewModel.disconnectPendant() }) {
+              Text("Disconnect")
+            }
+          } else if (pendantIsScanning) {
+            Button(onClick = { viewModel.stopPendantScan() }) {
+              Text("Stop Scan")
+            }
+          } else {
+            Button(onClick = {
+              if (!viewModel.isPendantBluetoothAvailable()) {
+                // Would need to request permissions here
+                return@Button
+              }
+              if (!viewModel.isPendantBluetoothEnabled()) {
+                // Would need to prompt user to enable Bluetooth
+                return@Button
+              }
+              viewModel.startPendantScan()
+            }) {
+              Text("Scan")
+            }
+          }
+        },
+      )
+    }
+    if (pendantActivePendant != null) {
+      item {
+        val batteryText = pendantBatteryLevel?.let { "$it%" } ?: "Unknown"
+        val streamingText = if (pendantIsStreaming) "Streaming" else "Connected"
+        ListItem(
+          headlineContent = { Text(pendantActivePendant?.displayName ?: "Pendant") },
+          supportingContent = {
+            Column {
+              Text("Type: ${pendantActivePendant?.typeDisplayName}")
+              Text("Battery: $batteryText")
+              Text("Status: $streamingText")
+            }
+          },
+        )
+      }
+    }
+    if (!pendantIsScanning && pendantDiscoveredDevices.isNotEmpty() && pendantActivePendant == null) {
+      items(items = pendantDiscoveredDevices, key = { it.address }) { pendant ->
+        ListItem(
+          headlineContent = { Text(pendant.displayName) },
+          supportingContent = {
+            Column {
+              Text("Type: ${pendant.typeDisplayName}")
+              Text("Signal: ${pendant.rssi} dBm")
+            }
+          },
+          trailingContent = {
+            Button(onClick = { viewModel.connectPendant(pendant) }) {
+              Text("Connect")
+            }
+          },
+        )
+      }
+    }
+    item {
+      Text(
+        "Connect a Friend or Limitless pendant for continuous audio capture.",
         color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
     }

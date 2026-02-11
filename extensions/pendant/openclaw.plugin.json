@@ -1,0 +1,34 @@
+{
+  "id": "pendant",
+  "kind": "integration",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "sttProvider": {
+        "type": "string",
+        "description": "Speech-to-text provider for pendant audio",
+        "enum": ["deepgram", "whisper", "gateway"],
+        "default": "gateway"
+      },
+      "deepgramApiKey": {
+        "type": "string",
+        "description": "Deepgram API key (if using Deepgram STT)"
+      },
+      "whisperEndpoint": {
+        "type": "string",
+        "description": "Whisper API endpoint (if using Whisper STT)"
+      },
+      "autoTranscribe": {
+        "type": "boolean",
+        "description": "Automatically transcribe incoming pendant audio",
+        "default": true
+      },
+      "bufferDurationMs": {
+        "type": "number",
+        "description": "Audio buffer duration before sending for transcription",
+        "default": 1000
+      }
+    }
+  }
+}

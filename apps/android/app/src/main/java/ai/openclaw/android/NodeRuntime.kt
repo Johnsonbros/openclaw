@@ -26,11 +26,16 @@ import ai.openclaw.android.BuildConfig
 import ai.openclaw.android.node.CanvasController
 import ai.openclaw.android.node.ScreenRecordManager
 import ai.openclaw.android.node.SmsManager
+import ai.openclaw.android.pendant.DiscoveredPendant
+import ai.openclaw.android.pendant.PendantConnectionState
+import ai.openclaw.android.pendant.PendantManager
+import ai.openclaw.android.pendant.PendantStatus
 import ai.openclaw.android.protocol.OpenClawCapability
 import ai.openclaw.android.protocol.OpenClawCameraCommand
 import ai.openclaw.android.protocol.OpenClawCanvasA2UIAction
 import ai.openclaw.android.protocol.OpenClawCanvasA2UICommand
 import ai.openclaw.android.protocol.OpenClawCanvasCommand
+import ai.openclaw.android.protocol.OpenClawPendantCommand
 import ai.openclaw.android.protocol.OpenClawScreenCommand
 import ai.openclaw.android.protocol.OpenClawLocationCommand
 import ai.openclaw.android.protocol.OpenClawSmsCommand
@@ -69,6 +74,7 @@ class NodeRuntime(context: Context) {
   val location = LocationCaptureManager(appContext)
   val screenRecorder = ScreenRecordManager(appContext)
   val sms = SmsManager(appContext)
+  val pendant = PendantManager(appContext, scope)
   private val json = Json { ignoreUnknownKeys = true }
 
   private val externalAudioCaptureActive = MutableStateFlow(false)
@@ -287,6 +293,15 @@ class NodeRuntime(context: Context) {
   val lastDiscoveredStableId: StateFlow<String> = prefs.lastDiscoveredStableId
   val canvasDebugStatusEnabled: StateFlow<Boolean> = prefs.canvasDebugStatusEnabled
 
+  // Pendant state flows
+  val pendantDiscoveredDevices: StateFlow<List<DiscoveredPendant>> = pendant.discoveredPendants
+  val pendantIsScanning: StateFlow<Boolean> = pendant.isScanning
+  val pendantConnectionState: StateFlow<PendantConnectionState> = pendant.connectionState
+  val pendantStatusText: StateFlow<String> = pendant.statusText
+  val pendantActivePendant: StateFlow<DiscoveredPendant?> = pendant.activePendant
+  val pendantBatteryLevel: StateFlow<Int?> = pendant.batteryLevel
+  val pendantIsStreaming: StateFlow<Boolean> = pendant.isStreaming
+
   private var didAutoConnect = false
   private var suppressWakeWordsSync = false
   private var wakeWordsSyncJob: Job? = null
@@ -470,6 +485,14 @@ class NodeRuntime(context: Context) {
       if (sms.canSendSms()) {
         add(OpenClawSmsCommand.Send.rawValue)
       }
+      if (pendant.isBluetoothAvailable()) {
+        add(OpenClawPendantCommand.Scan.rawValue)
+        add(OpenClawPendantCommand.Connect.rawValue)
+        add(OpenClawPendantCommand.Disconnect.rawValue)
+        add(OpenClawPendantCommand.Status.rawValue)
+        add(OpenClawPendantCommand.StartStream.rawValue)
+        add(OpenClawPendantCommand.StopStream.rawValue)
+      }
     }
 
   private fun buildCapabilities(): List<String> =
@@ -483,6 +506,9 @@ class NodeRuntime(context: Context) {
       }
       if (locationMode.value != LocationMode.Off) {
         add(OpenClawCapability.Location.rawValue)
+      }
+      if (pendant.isBluetoothAvailable()) {
+        add(OpenClawCapability.Pendant.rawValue)
       }
     }
 
@@ -1053,12 +1079,181 @@ class NodeRuntime(context: Context) {
           GatewaySession.InvokeResult.error(code = code, message = error)
         }
       }
+      OpenClawPendantCommand.Scan.rawValue -> {
+        handlePendantScan(paramsJson)
+      }
+      OpenClawPendantCommand.Connect.rawValue -> {
+        handlePendantConnect(paramsJson)
+      }
+      OpenClawPendantCommand.Disconnect.rawValue -> {
+        handlePendantDisconnect()
+      }
+      OpenClawPendantCommand.Status.rawValue -> {
+        handlePendantStatus()
+      }
+      OpenClawPendantCommand.StartStream.rawValue -> {
+        handlePendantStartStream(paramsJson)
+      }
+      OpenClawPendantCommand.StopStream.rawValue -> {
+        handlePendantStopStream()
+      }
       else ->
         GatewaySession.InvokeResult.error(
           code = "INVALID_REQUEST",
           message = "INVALID_REQUEST: unknown command",
         )
     }
+  }
+
+  private fun handlePendantScan(paramsJson: String?): GatewaySession.InvokeResult {
+    if (!pendant.isBluetoothAvailable()) {
+      return GatewaySession.InvokeResult.error(
+        code = "BLUETOOTH_UNAVAILABLE",
+        message = "BLUETOOTH_UNAVAILABLE: Bluetooth not available or permissions not granted",
+      )
+    }
+
+    if (!pendant.isBluetoothEnabled()) {
+      return GatewaySession.InvokeResult.error(
+        code = "BLUETOOTH_DISABLED",
+        message = "BLUETOOTH_DISABLED: Please enable Bluetooth",
+      )
+    }
+
+    val root = try {
+      paramsJson?.let { json.parseToJsonElement(it).asObjectOrNull() }
+    } catch (_: Throwable) { null }
+
+    val action = (root?.get("action") as? JsonPrimitive)?.content?.lowercase() ?: "start"
+    val timeoutMs = (root?.get("timeoutMs") as? JsonPrimitive)?.content?.toLongOrNull() ?: 30_000L
+
+    when (action) {
+      "start" -> {
+        val started = pendant.startScan(timeoutMs)
+        if (!started) {
+          return GatewaySession.InvokeResult.error(
+            code = "SCAN_FAILED",
+            message = "SCAN_FAILED: Failed to start BLE scan",
+          )
+        }
+        return GatewaySession.InvokeResult.ok("""{"scanning":true}""")
+      }
+      "stop" -> {
+        pendant.stopScan()
+        val devices = pendant.discoveredPendants.value
+        val devicesJson = devices.joinToString(",") { d ->
+          """{"address":"${d.address}","name":${d.name?.toJsonString() ?: "null"},"type":"${d.typeDisplayName}","rssi":${d.rssi}}"""
+        }
+        return GatewaySession.InvokeResult.ok("""{"scanning":false,"devices":[$devicesJson]}""")
+      }
+      else -> {
+        return GatewaySession.InvokeResult.error(
+          code = "INVALID_REQUEST",
+          message = "INVALID_REQUEST: action must be 'start' or 'stop'",
+        )
+      }
+    }
+  }
+
+  private fun handlePendantConnect(paramsJson: String?): GatewaySession.InvokeResult {
+    if (!pendant.isBluetoothAvailable()) {
+      return GatewaySession.InvokeResult.error(
+        code = "BLUETOOTH_UNAVAILABLE",
+        message = "BLUETOOTH_UNAVAILABLE: Bluetooth not available",
+      )
+    }
+
+    val root = try {
+      paramsJson?.let { json.parseToJsonElement(it).asObjectOrNull() }
+    } catch (_: Throwable) { null }
+
+    val address = (root?.get("address") as? JsonPrimitive)?.content?.trim()
+
+    if (address.isNullOrEmpty()) {
+      // Connect to first discovered pendant
+      val connected = pendant.connectFirst()
+      if (!connected) {
+        return GatewaySession.InvokeResult.error(
+          code = "NO_PENDANT_FOUND",
+          message = "NO_PENDANT_FOUND: No pendants discovered. Run pendant.scan first.",
+        )
+      }
+    } else {
+      // Connect to specific pendant
+      val device = pendant.discoveredPendants.value.find { it.address == address }
+      if (device == null) {
+        return GatewaySession.InvokeResult.error(
+          code = "PENDANT_NOT_FOUND",
+          message = "PENDANT_NOT_FOUND: No pendant with address $address",
+        )
+      }
+      pendant.connect(device)
+    }
+
+    val active = pendant.activePendant.value
+    return GatewaySession.InvokeResult.ok(
+      """{"connecting":true,"address":"${active?.address ?: ""}","name":${active?.name?.toJsonString() ?: "null"}}"""
+    )
+  }
+
+  private fun handlePendantDisconnect(): GatewaySession.InvokeResult {
+    pendant.disconnect()
+    return GatewaySession.InvokeResult.ok("""{"disconnected":true}""")
+  }
+
+  private fun handlePendantStatus(): GatewaySession.InvokeResult {
+    val status = pendant.getStatus()
+    if (status == null) {
+      return GatewaySession.InvokeResult.ok(
+        """{"connected":false,"streaming":false}"""
+      )
+    }
+
+    val batteryJson = status.batteryLevel?.toString() ?: "null"
+    val codecJson = status.audioCodec?.name?.lowercase()?.let { "\"$it\"" } ?: "null"
+
+    return GatewaySession.InvokeResult.ok(
+      """{"connected":true,"address":"${status.address}","name":${status.name?.toJsonString() ?: "null"},"type":"${status.type.name.lowercase()}","state":"${status.state.name.lowercase()}","streaming":${status.isStreaming},"batteryLevel":$batteryJson,"audioCodec":$codecJson}"""
+    )
+  }
+
+  private fun handlePendantStartStream(paramsJson: String?): GatewaySession.InvokeResult {
+    if (!pendant.isConnected()) {
+      return GatewaySession.InvokeResult.error(
+        code = "PENDANT_NOT_CONNECTED",
+        message = "PENDANT_NOT_CONNECTED: Connect to a pendant first",
+      )
+    }
+
+    // Set up audio callback to stream to gateway via events
+    pendant.setAudioCallback { pcmData ->
+      // Send audio data as base64-encoded event
+      scope.launch {
+        try {
+          val base64 = android.util.Base64.encodeToString(pcmData, android.util.Base64.NO_WRAP)
+          val status = pendant.getStatus()
+          val sampleRate = status?.audioCodec?.sampleRate ?: 16000
+          nodeSession.sendNodeEvent(
+            event = "pendant.audio",
+            payloadJson = buildJsonObject {
+              put("audio", JsonPrimitive(base64))
+              put("sampleRate", JsonPrimitive(sampleRate))
+              put("encoding", JsonPrimitive("pcm16"))
+              put("channels", JsonPrimitive(1))
+            }.toString()
+          )
+        } catch (_: Throwable) {
+          // Ignore send errors
+        }
+      }
+    }
+
+    return GatewaySession.InvokeResult.ok("""{"streaming":true}""")
+  }
+
+  private fun handlePendantStopStream(): GatewaySession.InvokeResult {
+    pendant.setAudioCallback(null)
+    return GatewaySession.InvokeResult.ok("""{"streaming":false}""")
   }
 
   private fun triggerCameraFlash() {

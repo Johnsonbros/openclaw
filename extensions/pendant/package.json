@@ -1,0 +1,21 @@
+{
+  "name": "@openclaw/plugin-pendant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BLE pendant audio streaming and transcription for OpenClaw",
+  "main": "index.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsup index.ts --format esm --dts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.14.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.10"
+  },
+  "peerDependencies": {
+    "openclaw": "workspace:*"
+  }
+}

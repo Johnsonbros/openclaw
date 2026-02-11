@@ -8,6 +8,9 @@ import ai.openclaw.android.node.CameraCaptureManager
 import ai.openclaw.android.node.CanvasController
 import ai.openclaw.android.node.ScreenRecordManager
 import ai.openclaw.android.node.SmsManager
+import ai.openclaw.android.pendant.DiscoveredPendant
+import ai.openclaw.android.pendant.PendantConnectionState
+import ai.openclaw.android.pendant.PendantManager
 import kotlinx.coroutines.flow.StateFlow
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -17,6 +20,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val camera: CameraCaptureManager = runtime.camera
   val screenRecorder: ScreenRecordManager = runtime.screenRecorder
   val sms: SmsManager = runtime.sms
+  val pendantManager: PendantManager = runtime.pendant
 
   val gateways: StateFlow<List<GatewayEndpoint>> = runtime.gateways
   val discoveryStatusText: StateFlow<String> = runtime.discoveryStatusText
@@ -52,6 +56,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val manualPort: StateFlow<Int> = runtime.manualPort
   val manualTls: StateFlow<Boolean> = runtime.manualTls
   val canvasDebugStatusEnabled: StateFlow<Boolean> = runtime.canvasDebugStatusEnabled
+
+  // Pendant state
+  val pendantDiscoveredDevices: StateFlow<List<DiscoveredPendant>> = runtime.pendantDiscoveredDevices
+  val pendantIsScanning: StateFlow<Boolean> = runtime.pendantIsScanning
+  val pendantConnectionState: StateFlow<PendantConnectionState> = runtime.pendantConnectionState
+  val pendantStatusText: StateFlow<String> = runtime.pendantStatusText
+  val pendantActivePendant: StateFlow<DiscoveredPendant?> = runtime.pendantActivePendant
+  val pendantBatteryLevel: StateFlow<Int?> = runtime.pendantBatteryLevel
+  val pendantIsStreaming: StateFlow<Boolean> = runtime.pendantIsStreaming
 
   val chatSessionKey: StateFlow<String> = runtime.chatSessionKey
   val chatSessionId: StateFlow<String?> = runtime.chatSessionId
@@ -170,5 +183,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun sendChat(message: String, thinking: String, attachments: List<OutgoingAttachment>) {
     runtime.sendChat(message = message, thinking = thinking, attachments = attachments)
+  }
+
+  // Pendant methods
+  fun startPendantScan(timeoutMs: Long = 30_000L): Boolean {
+    return runtime.pendant.startScan(timeoutMs)
+  }
+
+  fun stopPendantScan() {
+    runtime.pendant.stopScan()
+  }
+
+  fun connectPendant(pendant: DiscoveredPendant): Boolean {
+    return runtime.pendant.connect(pendant)
+  }
+
+  fun disconnectPendant() {
+    runtime.pendant.disconnect()
+  }
+
+  fun isPendantBluetoothAvailable(): Boolean {
+    return runtime.pendant.isBluetoothAvailable()
+  }
+
+  fun isPendantBluetoothEnabled(): Boolean {
+    return runtime.pendant.isBluetoothEnabled()
+  }
+
+  fun getPendantRequiredPermissions(): Array<String> {
+    return runtime.pendant.getRequiredPermissions()
   }
 }

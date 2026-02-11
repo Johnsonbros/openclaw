@@ -1,0 +1,389 @@
+/**
+ * Speaker diarization and voice fingerprinting for pendant audio.
+ *
+ * This module handles:
+ * 1. Speaker segmentation - detecting when different people speak
+ * 2. Voice embedding generation - creating unique fingerprints
+ * 3. Speaker matching - identifying known speakers
+ * 4. Profile management - linking voices to people profiles
+ */
+
+import type { Buffer } from "node:buffer";
+
+/**
+ * Voice embedding vector (typically 256-512 dimensions from a speaker embedding model).
+ */
+export type VoiceEmbedding = Float32Array;
+
+/**
+ * A speaker segment identified in audio.
+ */
+export interface SpeakerSegment {
+  speakerId: string;
+  startMs: number;
+  endMs: number;
+  confidence: number;
+  embedding?: VoiceEmbedding;
+}
+
+/**
+ * Voice profile for a known person.
+ */
+export interface VoiceProfile {
+  id: string;
+  personId?: string; // Link to people profile
+  personName?: string;
+  embeddings: VoiceEmbedding[]; // Multiple samples for better matching
+  createdAt: string;
+  updatedAt: string;
+  metadata: {
+    sampleCount: number;
+    lastSeenAt?: string;
+    autoCreated: boolean;
+    contexts: string[]; // Contexts where this voice was heard
+  };
+}
+
+/**
+ * Speaker identification result.
+ */
+export interface SpeakerMatch {
+  voiceProfileId: string | null;
+  personName: string | null;
+  confidence: number;
+  isNewSpeaker: boolean;
+  suggestedName?: string; // AI-suggested name based on context
+}
+
+/**
+ * Configuration for speaker diarization.
+ */
+export interface DiarizationConfig {
+  /** Minimum segment duration in ms */
+  minSegmentDurationMs: number;
+  /** Confidence threshold for speaker matching (0-1) */
+  matchThreshold: number;
+  /** Whether to auto-create profiles for unknown speakers */
+  autoCreateProfiles: boolean;
+  /** Model to use for voice embeddings */
+  embeddingModel: "pyannote" | "resemblyzer" | "speechbrain" | "local";
+  /** API endpoint for embedding generation (if using cloud) */
+  embeddingEndpoint?: string;
+}
+
+const DEFAULT_CONFIG: DiarizationConfig = {
+  minSegmentDurationMs: 500,
+  matchThreshold: 0.75,
+  autoCreateProfiles: true,
+  embeddingModel: "local",
+};
+
+/**
+ * Speaker diarization engine.
+ */
+export class SpeakerDiarizer {
+  private config: DiarizationConfig;
+  private profiles: Map<string, VoiceProfile> = new Map();
+
+  constructor(config: Partial<DiarizationConfig> = {}) {
+    this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  /**
+   * Process audio and return speaker segments with identifications.
+   */
+  async processAudio(
+    pcmData: Buffer,
+    sampleRate: number,
+    context?: { sessionKey: string; conversationContext?: string }
+  ): Promise<SpeakerSegment[]> {
+    // Step 1: Voice Activity Detection (VAD) - find speech regions
+    const speechRegions = await this.detectSpeech(pcmData, sampleRate);
+
+    // Step 2: Speaker segmentation - cluster speech regions by speaker
+    const segments = await this.segmentSpeakers(pcmData, sampleRate, speechRegions);
+
+    // Step 3: Generate embeddings for each segment
+    for (const segment of segments) {
+      const segmentAudio = this.extractSegment(pcmData, sampleRate, segment);
+      segment.embedding = await this.generateEmbedding(segmentAudio, sampleRate);
+    }
+
+    // Step 4: Match against known profiles and assign IDs
+    for (const segment of segments) {
+      if (segment.embedding) {
+        const match = await this.matchSpeaker(segment.embedding, context);
+        segment.speakerId = match.voiceProfileId || `unknown_${Date.now()}`;
+
+        // Auto-create profile if configured and new speaker
+        if (match.isNewSpeaker && this.config.autoCreateProfiles) {
+          await this.createProfile(segment.embedding, match.suggestedName, context);
+        }
+      }
+    }
+
+    return segments;
+  }
+
+  /**
+   * Detect speech regions using Voice Activity Detection.
+   */
+  private async detectSpeech(
+    pcmData: Buffer,
+    sampleRate: number
+  ): Promise<Array<{ startMs: number; endMs: number }>> {
+    // Placeholder - would use a VAD model like Silero VAD
+    // For now, treat entire audio as speech
+    const durationMs = (pcmData.length / 2 / sampleRate) * 1000;
+    return [{ startMs: 0, endMs: durationMs }];
+  }
+
+  /**
+   * Segment speech regions by speaker using clustering.
+   */
+  private async segmentSpeakers(
+    pcmData: Buffer,
+    sampleRate: number,
+    speechRegions: Array<{ startMs: number; endMs: number }>
+  ): Promise<SpeakerSegment[]> {
+    // Placeholder - would use speaker change detection
+    // For now, return one segment per speech region
+    return speechRegions.map((region, idx) => ({
+      speakerId: `speaker_${idx}`,
+      startMs: region.startMs,
+      endMs: region.endMs,
+      confidence: 0.8,
+    }));
+  }
+
+  /**
+   * Extract audio segment from buffer.
+   */
+  private extractSegment(
+    pcmData: Buffer,
+    sampleRate: number,
+    segment: SpeakerSegment
+  ): Buffer {
+    const bytesPerMs = (sampleRate * 2) / 1000; // 16-bit PCM
+    const startByte = Math.floor(segment.startMs * bytesPerMs);
+    const endByte = Math.floor(segment.endMs * bytesPerMs);
+    return pcmData.subarray(startByte, endByte);
+  }
+
+  /**
+   * Generate voice embedding for audio segment.
+   */
+  private async generateEmbedding(
+    pcmData: Buffer,
+    sampleRate: number
+  ): Promise<VoiceEmbedding> {
+    // Placeholder - would use a speaker embedding model
+    // Options:
+    // - Pyannote/speechbrain embeddings via API
+    // - Local ONNX model (resemblyzer, ecapa-tdnn)
+    // - OpenAI Whisper with speaker embeddings
+
+    // Return random embedding for now (256 dimensions)
+    const embedding = new Float32Array(256);
+    for (let i = 0; i < 256; i++) {
+      embedding[i] = Math.random() * 2 - 1;
+    }
+    return embedding;
+  }
+
+  /**
+   * Match embedding against known voice profiles.
+   */
+  private async matchSpeaker(
+    embedding: VoiceEmbedding,
+    context?: { sessionKey: string; conversationContext?: string }
+  ): Promise<SpeakerMatch> {
+    let bestMatch: VoiceProfile | null = null;
+    let bestScore = 0;
+
+    for (const profile of this.profiles.values()) {
+      for (const profileEmbedding of profile.embeddings) {
+        const score = this.cosineSimilarity(embedding, profileEmbedding);
+        if (score > bestScore && score >= this.config.matchThreshold) {
+          bestScore = score;
+          bestMatch = profile;
+        }
+      }
+    }
+
+    if (bestMatch) {
+      return {
+        voiceProfileId: bestMatch.id,
+        personName: bestMatch.personName || null,
+        confidence: bestScore,
+        isNewSpeaker: false,
+      };
+    }
+
+    // New speaker - try to infer name from context
+    const suggestedName = context?.conversationContext
+      ? this.inferNameFromContext(context.conversationContext)
+      : undefined;
+
+    return {
+      voiceProfileId: null,
+      personName: null,
+      confidence: 0,
+      isNewSpeaker: true,
+      suggestedName,
+    };
+  }
+
+  /**
+   * Calculate cosine similarity between two embeddings.
+   */
+  private cosineSimilarity(a: VoiceEmbedding, b: VoiceEmbedding): number {
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+
+    const denominator = Math.sqrt(normA) * Math.sqrt(normB);
+    return denominator === 0 ? 0 : dotProduct / denominator;
+  }
+
+  /**
+   * Infer speaker name from conversation context.
+   */
+  private inferNameFromContext(context: string): string | undefined {
+    // Simple heuristic - look for name patterns
+    // In production, this would use AI to analyze context
+    const namePatterns = [
+      /(?:this is|I'm|my name is)\s+([A-Z][a-z]+)/i,
+      /(?:talking to|meeting with)\s+([A-Z][a-z]+)/i,
+      /([A-Z][a-z]+)\s+(?:is here|joined)/i,
+    ];
+
+    for (const pattern of namePatterns) {
+      const match = context.match(pattern);
+      if (match) {
+        return match[1];
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Create a new voice profile.
+   */
+  async createProfile(
+    embedding: VoiceEmbedding,
+    suggestedName?: string,
+    context?: { sessionKey: string; conversationContext?: string }
+  ): Promise<VoiceProfile> {
+    const id = `voice_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const now = new Date().toISOString();
+
+    const profile: VoiceProfile = {
+      id,
+      personName: suggestedName,
+      embeddings: [embedding],
+      createdAt: now,
+      updatedAt: now,
+      metadata: {
+        sampleCount: 1,
+        lastSeenAt: now,
+        autoCreated: true,
+        contexts: context?.sessionKey ? [context.sessionKey] : [],
+      },
+    };
+
+    this.profiles.set(id, profile);
+    return profile;
+  }
+
+  /**
+   * Update existing profile with new embedding sample.
+   */
+  async updateProfile(profileId: string, embedding: VoiceEmbedding): Promise<void> {
+    const profile = this.profiles.get(profileId);
+    if (!profile) return;
+
+    // Keep most recent N embeddings
+    const maxEmbeddings = 10;
+    profile.embeddings.push(embedding);
+    if (profile.embeddings.length > maxEmbeddings) {
+      profile.embeddings.shift();
+    }
+
+    profile.updatedAt = new Date().toISOString();
+    profile.metadata.sampleCount++;
+    profile.metadata.lastSeenAt = profile.updatedAt;
+  }
+
+  /**
+   * Link a voice profile to a person profile.
+   */
+  async linkToPerson(voiceProfileId: string, personId: string, personName: string): Promise<void> {
+    const profile = this.profiles.get(voiceProfileId);
+    if (profile) {
+      profile.personId = personId;
+      profile.personName = personName;
+      profile.metadata.autoCreated = false;
+      profile.updatedAt = new Date().toISOString();
+    }
+  }
+
+  /**
+   * Get all voice profiles.
+   */
+  getProfiles(): VoiceProfile[] {
+    return Array.from(this.profiles.values());
+  }
+
+  /**
+   * Load profiles from storage.
+   */
+  async loadProfiles(profiles: VoiceProfile[]): Promise<void> {
+    for (const profile of profiles) {
+      // Convert embedding arrays back to Float32Array
+      profile.embeddings = profile.embeddings.map(
+        (e) => new Float32Array(e as unknown as ArrayLike<number>)
+      );
+      this.profiles.set(profile.id, profile);
+    }
+  }
+
+  /**
+   * Export profiles for storage.
+   */
+  exportProfiles(): VoiceProfile[] {
+    return this.getProfiles().map((profile) => ({
+      ...profile,
+      embeddings: profile.embeddings.map((e) => Array.from(e) as unknown as Float32Array),
+    }));
+  }
+}
+
+/**
+ * Convert diarization results to a transcript with speaker labels.
+ */
+export function formatDiarizedTranscript(
+  segments: SpeakerSegment[],
+  transcripts: Map<string, string>
+): string {
+  const lines: string[] = [];
+
+  for (const segment of segments) {
+    const transcript = transcripts.get(segment.speakerId);
+    if (transcript) {
+      const speakerLabel = segment.speakerId.startsWith("unknown_")
+        ? `Unknown Speaker`
+        : segment.speakerId;
+      lines.push(`[${speakerLabel}]: ${transcript}`);
+    }
+  }
+
+  return lines.join("\n");
+}

@@ -28,6 +28,21 @@
         "type": "number",
         "description": "Audio buffer duration before sending for transcription",
         "default": 1000
+      },
+      "enableSpeakerDiarization": {
+        "type": "boolean",
+        "description": "Enable speaker diarization and voice fingerprinting",
+        "default": true
+      },
+      "speakerMatchThreshold": {
+        "type": "number",
+        "description": "Confidence threshold for matching voices to known profiles (0-1)",
+        "default": 0.75
+      },
+      "autoCreateVoiceProfiles": {
+        "type": "boolean",
+        "description": "Automatically create voice profiles for unrecognized speakers",
+        "default": true
       }
     }
   }

@@ -1,4 +1,5 @@
 import type { OpenClawPluginApi, PluginConfigContext } from "openclaw/plugin-sdk";
+import { SpeakerDiarizer, type VoiceProfile, type SpeakerSegment } from "./speaker-diarization.js";
 
 /**
  * Pendant audio buffer for accumulating PCM data before transcription.
@@ -11,6 +12,22 @@ interface AudioBuffer {
 }
 
 /**
+ * Pendant channel state per session.
+ */
+interface PendantChannelState {
+  isActive: boolean;
+  currentSpeaker: string | null;
+  speakerHistory: Array<{
+    speakerId: string;
+    personName?: string;
+    timestamp: string;
+    durationMs: number;
+  }>;
+  totalAudioMs: number;
+  sessionStartTime: string;
+}
+
+/**
  * Pendant plugin configuration.
  */
 interface PendantConfig {
@@ -19,6 +36,9 @@ interface PendantConfig {
   whisperEndpoint?: string;
   autoTranscribe: boolean;
   bufferDurationMs: number;
+  enableSpeakerDiarization: boolean;
+  speakerMatchThreshold: number;
+  autoCreateVoiceProfiles: boolean;
 }
 
 /**
@@ -65,12 +85,72 @@ const pendantPlugin = {
         description: "Audio buffer duration before sending for transcription",
         default: 1000,
       },
+      enableSpeakerDiarization: {
+        type: "boolean" as const,
+        description: "Enable speaker diarization and voice fingerprinting",
+        default: true,
+      },
+      speakerMatchThreshold: {
+        type: "number" as const,
+        description: "Confidence threshold for matching voices to known profiles (0-1)",
+        default: 0.75,
+      },
+      autoCreateVoiceProfiles: {
+        type: "boolean" as const,
+        description: "Automatically create voice profiles for unrecognized speakers",
+        default: true,
+      },
     },
   },
 
   register(api: OpenClawPluginApi) {
     // Store audio buffers per session
     const audioBuffers = new Map<string, AudioBuffer>();
+
+    // Speaker diarization engine
+    const diarizer = new SpeakerDiarizer({
+      matchThreshold: 0.75,
+      autoCreateProfiles: true,
+    });
+
+    // Pendant channel state per session
+    const channelStates = new Map<string, PendantChannelState>();
+
+    // Voice profiles storage key
+    const VOICE_PROFILES_KEY = "pendant:voice_profiles";
+
+    // Load voice profiles on startup
+    (async () => {
+      try {
+        const stored = await api.runtime.storage?.get(VOICE_PROFILES_KEY);
+        if (stored) {
+          const profiles = JSON.parse(stored) as VoiceProfile[];
+          await diarizer.loadProfiles(profiles);
+          console.log(`[Pendant] Loaded ${profiles.length} voice profiles`);
+        }
+      } catch (e) {
+        console.error("[Pendant] Failed to load voice profiles:", e);
+      }
+    })();
+
+    // Save voice profiles periodically
+    const saveProfiles = async () => {
+      try {
+        const profiles = diarizer.exportProfiles();
+        await api.runtime.storage?.set(VOICE_PROFILES_KEY, JSON.stringify(profiles));
+      } catch (e) {
+        console.error("[Pendant] Failed to save voice profiles:", e);
+      }
+    };
+
+    // Register pendant as a dedicated channel
+    api.registerChannel?.({
+      id: "pendant",
+      name: "BLE Pendant",
+      description: "Audio input from connected BLE pendant device",
+      icon: "microphone",
+      capabilities: ["audio-input", "speaker-diarization", "voice-fingerprint"],
+    });
 
     // Register event handler for pendant audio
     api.registerEvent(
@@ -129,17 +209,96 @@ const pendantPlugin = {
             );
 
             if (transcript && transcript.trim()) {
-              // Send transcript as a message event
+              let speakerInfo: SpeakerSegment | null = null;
+              let speakerName: string | null = null;
+
+              // Run speaker diarization if enabled
+              if (config.enableSpeakerDiarization) {
+                const segments = await diarizer.processAudio(
+                  combinedPcm,
+                  buffer.sampleRate,
+                  {
+                    sessionKey: ctx.sessionKey,
+                    conversationContext: transcript,
+                  }
+                );
+
+                if (segments.length > 0) {
+                  speakerInfo = segments[0];
+                  const profiles = diarizer.getProfiles();
+                  const matchedProfile = profiles.find(
+                    (p) => p.id === speakerInfo?.speakerId
+                  );
+                  speakerName = matchedProfile?.personName || null;
+
+                  // Update channel state
+                  let state = channelStates.get(ctx.sessionKey);
+                  if (!state) {
+                    state = {
+                      isActive: true,
+                      currentSpeaker: null,
+                      speakerHistory: [],
+                      totalAudioMs: 0,
+                      sessionStartTime: new Date().toISOString(),
+                    };
+                    channelStates.set(ctx.sessionKey, state);
+                  }
+
+                  state.currentSpeaker = speakerInfo.speakerId;
+                  state.totalAudioMs += bufferDurationMs;
+                  state.speakerHistory.push({
+                    speakerId: speakerInfo.speakerId,
+                    personName: speakerName || undefined,
+                    timestamp: new Date().toISOString(),
+                    durationMs: bufferDurationMs,
+                  });
+
+                  // Save profiles periodically
+                  if (state.speakerHistory.length % 10 === 0) {
+                    await saveProfiles();
+                  }
+                }
+              }
+
+              // Format transcript with speaker info
+              const formattedTranscript = speakerName
+                ? `[${speakerName}]: ${transcript.trim()}`
+                : speakerInfo
+                ? `[Speaker ${speakerInfo.speakerId.slice(-6)}]: ${transcript.trim()}`
+                : transcript.trim();
+
+              // Send transcript via pendant channel
               api.runtime.events.emit("pendant.transcript", {
+                channel: "pendant",
                 sessionKey: ctx.sessionKey,
                 transcript: transcript.trim(),
+                formattedTranscript,
+                speaker: speakerInfo
+                  ? {
+                      id: speakerInfo.speakerId,
+                      name: speakerName,
+                      confidence: speakerInfo.confidence,
+                      isNew: speakerInfo.speakerId.startsWith("voice_"),
+                    }
+                  : null,
                 durationMs: bufferDurationMs,
                 timestamp: new Date().toISOString(),
               });
 
-              // Optionally inject as user message
-              // This would trigger the AI to respond
-              // api.runtime.session.injectUserMessage(ctx.sessionKey, transcript);
+              // Emit event for AI to process
+              // This creates a distinct input channel separate from direct messages
+              api.runtime.events.emit("channel.message", {
+                channel: "pendant",
+                type: "audio_transcript",
+                sessionKey: ctx.sessionKey,
+                content: formattedTranscript,
+                metadata: {
+                  source: "pendant",
+                  speakerId: speakerInfo?.speakerId,
+                  speakerName,
+                  audioMs: bufferDurationMs,
+                },
+              });
             }
           }
         } catch (error) {
@@ -172,6 +331,141 @@ const pendantPlugin = {
           });
       },
       { commands: ["pendant"] }
+    );
+
+    // Register tool for voice profile management
+    api.registerTool(
+      () => ({
+        name: "voice_profile_list",
+        description: "List all known voice profiles (people whose voices have been fingerprinted)",
+        parameters: {
+          type: "object" as const,
+          properties: {},
+          required: [],
+        },
+        async execute() {
+          const profiles = diarizer.getProfiles();
+          return {
+            count: profiles.length,
+            profiles: profiles.map((p) => ({
+              id: p.id,
+              personId: p.personId,
+              personName: p.personName,
+              autoCreated: p.metadata.autoCreated,
+              sampleCount: p.metadata.sampleCount,
+              lastSeenAt: p.metadata.lastSeenAt,
+              createdAt: p.createdAt,
+            })),
+          };
+        },
+      }),
+      { names: ["voice_profile_list"] }
+    );
+
+    api.registerTool(
+      () => ({
+        name: "voice_profile_identify",
+        description: "Assign a name/identity to a voice profile (link a voice to a person)",
+        parameters: {
+          type: "object" as const,
+          properties: {
+            voiceProfileId: {
+              type: "string" as const,
+              description: "The voice profile ID to update",
+            },
+            personName: {
+              type: "string" as const,
+              description: "The person's name",
+            },
+            personId: {
+              type: "string" as const,
+              description: "Optional ID to link to a contacts/people profile",
+            },
+          },
+          required: ["voiceProfileId", "personName"],
+        },
+        async execute(params: {
+          voiceProfileId: string;
+          personName: string;
+          personId?: string;
+        }) {
+          await diarizer.linkToPerson(
+            params.voiceProfileId,
+            params.personId || params.voiceProfileId,
+            params.personName
+          );
+          await saveProfiles();
+
+          return {
+            success: true,
+            message: `Voice profile ${params.voiceProfileId} linked to "${params.personName}"`,
+          };
+        },
+      }),
+      { names: ["voice_profile_identify"] }
+    );
+
+    api.registerTool(
+      () => ({
+        name: "pendant_channel_status",
+        description: "Get status of the pendant audio channel including speaker history",
+        parameters: {
+          type: "object" as const,
+          properties: {
+            sessionKey: {
+              type: "string" as const,
+              description: "Session key to get status for (optional, uses current session)",
+            },
+          },
+          required: [],
+        },
+        async execute(params: { sessionKey?: string }, ctx) {
+          const key = params.sessionKey || ctx.sessionKey;
+          const state = channelStates.get(key);
+
+          if (!state) {
+            return {
+              active: false,
+              message: "No pendant channel active for this session",
+            };
+          }
+
+          // Get unique speakers from history
+          const uniqueSpeakers = new Map<
+            string,
+            { name?: string; totalMs: number; lastSeen: string }
+          >();
+          for (const entry of state.speakerHistory) {
+            const existing = uniqueSpeakers.get(entry.speakerId);
+            if (existing) {
+              existing.totalMs += entry.durationMs;
+              existing.lastSeen = entry.timestamp;
+            } else {
+              uniqueSpeakers.set(entry.speakerId, {
+                name: entry.personName,
+                totalMs: entry.durationMs,
+                lastSeen: entry.timestamp,
+              });
+            }
+          }
+
+          return {
+            active: state.isActive,
+            currentSpeaker: state.currentSpeaker,
+            sessionStartTime: state.sessionStartTime,
+            totalAudioMs: state.totalAudioMs,
+            uniqueSpeakers: Array.from(uniqueSpeakers.entries()).map(
+              ([id, data]) => ({
+                id,
+                name: data.name,
+                totalSpeakingMs: data.totalMs,
+                lastSeen: data.lastSeen,
+              })
+            ),
+          };
+        },
+      }),
+      { names: ["pendant_channel_status"] }
     );
 
     // Register tool for AI to control pendant

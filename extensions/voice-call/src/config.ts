@@ -277,6 +277,41 @@ export const VoiceCallStreamingConfigSchema = z
 export type VoiceCallStreamingConfig = z.infer<typeof VoiceCallStreamingConfigSchema>;
 
 // -----------------------------------------------------------------------------
+// SMS Configuration
+// -----------------------------------------------------------------------------
+
+export const SmsConfigSchema = z
+  .object({
+    /** Enable SMS send/receive via the configured provider */
+    enabled: z.boolean().default(false),
+    /** Inbound SMS policy (reuses same enum as calls) */
+    inboundPolicy: InboundPolicySchema.default("disabled"),
+    /** Allowlist of phone numbers for inbound SMS (E.164) */
+    allowFrom: z.array(E164Schema).default([]),
+    /** Auto-reply greeting for first inbound SMS from an allowed number */
+    inboundGreeting: z.string().optional(),
+    /** Webhook path for SMS (separate from voice to avoid routing confusion) */
+    webhookPath: z.string().min(1).default("/sms/webhook"),
+    /** Model for generating SMS responses (falls back to responseModel if unset) */
+    responseModel: z.string().optional(),
+    /** System prompt for SMS auto-responses */
+    responseSystemPrompt: z.string().optional(),
+    /** Timeout for SMS response generation in ms */
+    responseTimeoutMs: z.number().int().positive().default(30000),
+    /** Owner phone number — receives admin-level access (E.164) */
+    ownerNumber: E164Schema.optional(),
+  })
+  .strict()
+  .default({
+    enabled: false,
+    inboundPolicy: "disabled",
+    allowFrom: [],
+    webhookPath: "/sms/webhook",
+    responseTimeoutMs: 30000,
+  });
+export type SmsConfig = z.infer<typeof SmsConfigSchema>;
+
+// -----------------------------------------------------------------------------
 // Main Voice Call Configuration
 // -----------------------------------------------------------------------------
 
@@ -365,6 +400,9 @@ export const VoiceCallConfigSchema = z
 
     /** Timeout for response generation in ms (default 30s) */
     responseTimeoutMs: z.number().int().positive().default(30000),
+
+    /** SMS configuration */
+    sms: SmsConfigSchema,
   })
   .strict();
 

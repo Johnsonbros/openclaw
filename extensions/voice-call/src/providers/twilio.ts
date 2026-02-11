@@ -4,11 +4,15 @@ import type { MediaStreamHandler } from "../media-stream.js";
 import type { TelephonyTtsProvider } from "../telephony-tts.js";
 import type {
   HangupCallInput,
+  InboundSmsEvent,
   InitiateCallInput,
   InitiateCallResult,
   NormalizedEvent,
   PlayTtsInput,
   ProviderWebhookParseResult,
+  SendSmsInput,
+  SendSmsResult,
+  SmsDeliveryEvent,
   StartListeningInput,
   StopListeningInput,
   WebhookContext,
@@ -567,6 +571,109 @@ export class TwilioProvider implements VoiceCallProvider {
     // Twilio's <Gather> automatically stops on speech end
     // No explicit action needed
   }
+
+  // ---------------------------------------------------------------------------
+  // SMS Support
+  // ---------------------------------------------------------------------------
+
+  /** Twilio supports SMS via the Messages API. */
+  supportsSms(): boolean {
+    return true;
+  }
+
+  /**
+   * Send an SMS (or MMS) via Twilio Messages API.
+   * @see https://www.twilio.com/docs/messaging/api/message-resource#create-a-message-resource
+   */
+  async sendSms(input: SendSmsInput): Promise<SendSmsResult> {
+    const params: Record<string, string | string[]> = {
+      To: input.to,
+      From: input.from,
+      Body: input.body,
+    };
+
+    if (input.statusCallbackUrl) {
+      params.StatusCallback = input.statusCallbackUrl;
+    }
+
+    // MMS: attach up to 10 media URLs
+    if (input.mediaUrls && input.mediaUrls.length > 0) {
+      params.MediaUrl = input.mediaUrls;
+    }
+
+    const result = await this.apiRequest<TwilioMessageResponse>("/Messages.json", params);
+
+    return {
+      messageId: result.sid,
+      status: result.status === "failed" || result.status === "undelivered" ? "failed" : "queued",
+    };
+  }
+
+  /**
+   * Parse a Twilio SMS webhook (inbound message or delivery status).
+   * Twilio POSTs form-encoded params to the webhook URL configured on the phone number.
+   *
+   * Inbound: contains `Body`, `From`, `To`, `MessageSid`, `NumMedia`
+   * Status:  contains `MessageStatus`, `MessageSid`
+   */
+  parseSmsWebhookEvent(
+    ctx: WebhookContext,
+  ): { inbound?: InboundSmsEvent; delivery?: SmsDeliveryEvent } | null {
+    const params = new URLSearchParams(ctx.rawBody);
+
+    // Distinguish SMS from voice by checking for SMS-specific fields
+    const messageSid = params.get("MessageSid") || params.get("SmsSid");
+    if (!messageSid) {
+      return null;
+    }
+
+    // Delivery status callback (outbound message status update)
+    const messageStatus = params.get("MessageStatus");
+    if (messageStatus && !params.get("Body")) {
+      const statusMap: Record<string, SmsDeliveryEvent["status"]> = {
+        sent: "sent",
+        delivered: "delivered",
+        undelivered: "undelivered",
+        failed: "failed",
+      };
+      const status = statusMap[messageStatus];
+      if (status) {
+        return {
+          delivery: {
+            messageId: messageSid,
+            status,
+            errorCode: params.get("ErrorCode") || undefined,
+          },
+        };
+      }
+      return null;
+    }
+
+    // Inbound SMS
+    const body = params.get("Body") ?? "";
+    const from = params.get("From") ?? "";
+    const to = params.get("To") ?? "";
+    const numMedia = parseInt(params.get("NumMedia") || "0", 10);
+
+    const mediaUrls: string[] = [];
+    for (let i = 0; i < numMedia; i++) {
+      const url = params.get(`MediaUrl${i}`);
+      if (url) {
+        mediaUrls.push(url);
+      }
+    }
+
+    return {
+      inbound: {
+        messageId: messageSid,
+        from,
+        to,
+        body,
+        mediaUrls,
+        receivedAt: Date.now(),
+      },
+    };
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -579,5 +686,16 @@ interface TwilioCallResponse {
   direction: string;
   from: string;
   to: string;
+  uri: string;
+}
+
+interface TwilioMessageResponse {
+  sid: string;
+  status: string;
+  to: string;
+  from: string;
+  body: string;
+  date_created: string;
+  date_updated: string;
   uri: string;
 }

@@ -1,10 +1,14 @@
 import type {
   HangupCallInput,
+  InboundSmsEvent,
   InitiateCallInput,
   InitiateCallResult,
   PlayTtsInput,
   ProviderName,
   ProviderWebhookParseResult,
+  SendSmsInput,
+  SendSmsResult,
+  SmsDeliveryEvent,
   StartListeningInput,
   StopListeningInput,
   WebhookContext,
@@ -64,4 +68,23 @@ export interface VoiceCallProvider {
    * Stop listening for user speech (deactivate STT).
    */
   stopListening(input: StopListeningInput): Promise<void>;
+
+  // ---------------------------------------------------------------------------
+  // SMS (optional — providers opt in by implementing these methods)
+  // ---------------------------------------------------------------------------
+
+  /** Whether this provider supports SMS send/receive. */
+  supportsSms?(): boolean;
+
+  /** Send an SMS message via the provider API. */
+  sendSms?(input: SendSmsInput): Promise<SendSmsResult>;
+
+  /**
+   * Parse an inbound SMS webhook into a structured event.
+   * Returns null if the webhook is not an SMS event.
+   */
+  parseSmsWebhookEvent?(ctx: WebhookContext): {
+    inbound?: InboundSmsEvent;
+    delivery?: SmsDeliveryEvent;
+  } | null;
 }

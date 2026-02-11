@@ -26,6 +26,9 @@
         tools:targetApi="s" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
+    <!-- Geofencing - re-register geofences after reboot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
@@ -55,6 +58,21 @@
             android:name=".pendant.PendantService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+
+        <!-- Geofence broadcast receiver -->
+        <receiver
+            android:name=".location.GeofenceBroadcastReceiver"
+            android:exported="false" />
+
+        <!-- Boot receiver to re-register geofences -->
+        <receiver
+            android:name=".location.BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <activity
             android:name=".MainActivity"
             android:exported="true">

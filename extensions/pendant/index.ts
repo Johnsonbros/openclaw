@@ -1,13 +1,77 @@
-import type { OpenClawPluginApi, PluginConfigContext } from "openclaw/plugin-sdk";
+/**
+ * Pendant Plugin for OpenClaw
+ *
+ * @module pendant
+ * @description Audio streaming, transcription, intent detection, task management,
+ * location-based reminders, and long-term memory from BLE pendant devices.
+ *
+ * ## Features
+ *
+ * - **Audio Streaming**: Receives and processes audio from BLE pendant devices
+ * - **Speech-to-Text**: Transcription via Deepgram, Whisper, or gateway STT
+ * - **Speaker Diarization**: Identifies and tracks different speakers
+ * - **Intent Detection**: Recognizes task creation, memory save, and other intents
+ * - **Task Management**: Create, list, complete tasks from voice commands
+ * - **Location-Based Reminders**: Geofencing triggers for location-aware tasks
+ * - **People Profiles**: Track people with their locations
+ * - **Long-Term Memory**: Auto-saves transcripts to searchable memory files
+ *
+ * ## Configuration
+ *
+ * See {@link PendantConfig} for all configuration options.
+ *
+ * @example
+ * ```json
+ * {
+ *   "sttProvider": "deepgram",
+ *   "deepgramApiKey": "your-api-key",
+ *   "autoTranscribe": true,
+ *   "autoSaveToMemory": true,
+ *   "locationDefaultRadiusMeters": 100
+ * }
+ * ```
+ */
+
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import { triggerInternalHook, createInternalHookEvent } from "../../src/hooks/internal-hooks.js";
+import {
+  classifyIntent,
+  classifyTranscript,
+  classifyWithLLM,
+  describeIntent,
+  needsAIClarification,
+  type ClassifiedIntent,
+  type CompoundIntent,
+  type TranscriptWindow,
+  type TranscriptEntry,
+  type ClassifyConfig,
+} from "./intent-classifier.js";
+import { LocationManager, createLocationTools, type SavedLocation } from "./locations.js";
+import { MemoryHookManager, type MemoryHookConfig } from "./memory-hook.js";
+import { PeopleProfileManager, createPeopleTools, type PersonProfile } from "./people-profiles.js";
 import { SpeakerDiarizer, type VoiceProfile, type SpeakerSegment } from "./speaker-diarization.js";
+import { createStorage, type PendantStorage } from "./storage.js";
+import { TaskManager, createTaskTools, formatTaskList, type Task } from "./tasks.js";
+
+// Local type definitions for plugin context
+type PluginToolContext = { sessionKey?: string; config?: unknown; workspaceDir?: string };
+type PluginConfigContext = { sessionKey: string; config?: unknown; workspaceDir?: string };
+
+// ============================================================================
+// Types
+// ============================================================================
 
 /**
  * Pendant audio buffer for accumulating PCM data before transcription.
  */
 interface AudioBuffer {
+  /** Accumulated PCM audio samples */
   samples: Buffer[];
+  /** Sample rate of the audio */
   sampleRate: number;
+  /** Timestamp when buffering started */
   startTime: number;
+  /** Total bytes accumulated */
   totalBytes: number;
 }
 
@@ -15,52 +79,135 @@ interface AudioBuffer {
  * Pendant channel state per session.
  */
 interface PendantChannelState {
+  /** Whether the channel is actively receiving audio */
   isActive: boolean;
+  /** Current speaker's voice profile ID */
   currentSpeaker: string | null;
+  /** History of speakers in this session */
   speakerHistory: Array<{
     speakerId: string;
     personName?: string;
     timestamp: string;
     durationMs: number;
   }>;
+  /** Total audio processed in milliseconds */
   totalAudioMs: number;
+  /** When this session started */
   sessionStartTime: string;
 }
 
 /**
  * Pendant plugin configuration.
+ *
+ * @example
+ * ```typescript
+ * const config: PendantConfig = {
+ *   sttProvider: "deepgram",
+ *   deepgramApiKey: "your-api-key",
+ *   autoTranscribe: true,
+ *   enableSpeakerDiarization: true,
+ *   autoSaveToMemory: true,
+ *   locationDefaultRadiusMeters: 100,
+ * };
+ * ```
  */
 interface PendantConfig {
+  // --- STT Configuration ---
+
+  /** Speech-to-text provider to use */
   sttProvider: "deepgram" | "whisper" | "gateway";
+  /** Deepgram API key (required if sttProvider is "deepgram") */
   deepgramApiKey?: string;
+  /** Whisper API endpoint (required if sttProvider is "whisper") */
   whisperEndpoint?: string;
+  /** Automatically transcribe incoming pendant audio */
   autoTranscribe: boolean;
+  /** Audio buffer duration in ms before sending for transcription */
   bufferDurationMs: number;
+
+  // --- Speaker Diarization ---
+
+  /** Enable speaker diarization and voice fingerprinting */
   enableSpeakerDiarization: boolean;
+  /** Confidence threshold for matching voices to known profiles (0-1) */
   speakerMatchThreshold: number;
+  /** Automatically create voice profiles for unrecognized speakers */
   autoCreateVoiceProfiles: boolean;
+
+  // --- Intent Detection ---
+
+  /** Enable automatic intent detection from transcripts */
+  enableIntentDetection: boolean;
+  /** Minimum confidence to act on detected intent (0-1) */
+  intentConfidenceThreshold: number;
+  /** Number of recent transcript entries to keep in the sliding context window */
+  transcriptWindowSize: number;
+  /** Always use LLM for classification, even for simple commands */
+  intentUseLLMAlways: boolean;
+
+  // --- Memory Auto-Save ---
+
+  /** Auto-save pendant transcripts to long-term memory */
+  autoSaveToMemory: boolean;
+  /** How often to flush transcripts to memory (ms) */
+  memoryFlushIntervalMs: number;
+  /** Minimum entries before flushing to memory */
+  memoryFlushMinEntries: number;
+
+  // --- Location Settings ---
+
+  /** Default geofence radius for saved locations (meters) */
+  locationDefaultRadiusMeters: number;
+  /** How to alert on location-based reminders */
+  locationReminderMode: "notification" | "ai_message" | "both";
+
+  // --- Voice Activity Detection (Software Redundancy) ---
+
+  /** Enable software VAD to skip silence (redundant with pendant hardware VAD) */
+  enableSoftwareVAD: boolean;
+  /** RMS energy threshold for speech detection (0-1, default 0.01) */
+  vadEnergyThreshold: number;
+  /** Minimum percentage of frames above threshold to consider speech (0-1) */
+  vadSpeechRatio: number;
 }
 
 /**
  * Pendant audio event payload from Android node.
  */
 interface PendantAudioEvent {
-  audio: string; // Base64-encoded PCM audio
+  /** Base64-encoded PCM audio data */
+  audio: string;
+  /** Sample rate in Hz */
   sampleRate: number;
-  encoding: string; // "pcm16"
+  /** Audio encoding format */
+  encoding: string;
+  /** Number of audio channels */
   channels: number;
 }
 
+// ============================================================================
+// Plugin Definition
+// ============================================================================
+
+/**
+ * The pendant plugin definition.
+ */
 const pendantPlugin = {
   id: "pendant",
   name: "BLE Pendant",
-  description: "Audio streaming and transcription from BLE pendant devices",
+  description:
+    "Audio streaming, transcription, intent detection, tasks, location reminders, and memory from BLE pendant devices",
   kind: "integration",
 
+  /**
+   * Configuration schema for the pendant plugin.
+   * All options are documented with types and defaults.
+   */
   configSchema: {
     type: "object" as const,
     additionalProperties: false,
     properties: {
+      // STT Configuration
       sttProvider: {
         type: "string" as const,
         description: "Speech-to-text provider for pendant audio",
@@ -82,9 +229,11 @@ const pendantPlugin = {
       },
       bufferDurationMs: {
         type: "number" as const,
-        description: "Audio buffer duration before sending for transcription",
+        description: "Audio buffer duration before sending for transcription (ms)",
         default: 1000,
       },
+
+      // Speaker Diarization
       enableSpeakerDiarization: {
         type: "boolean" as const,
         description: "Enable speaker diarization and voice fingerprinting",
@@ -100,11 +249,91 @@ const pendantPlugin = {
         description: "Automatically create voice profiles for unrecognized speakers",
         default: true,
       },
+
+      // Intent Detection
+      enableIntentDetection: {
+        type: "boolean" as const,
+        description: "Enable automatic intent detection from transcripts",
+        default: true,
+      },
+      intentConfidenceThreshold: {
+        type: "number" as const,
+        description: "Minimum confidence to act on detected intent (0-1)",
+        default: 0.7,
+      },
+      transcriptWindowSize: {
+        type: "number" as const,
+        description:
+          "Number of recent transcript entries to keep in the sliding context window for LLM classification",
+        default: 10,
+      },
+      intentUseLLMAlways: {
+        type: "boolean" as const,
+        description: "Always use LLM for intent classification, even for simple commands",
+        default: false,
+      },
+
+      // Memory Auto-Save
+      autoSaveToMemory: {
+        type: "boolean" as const,
+        description: "Auto-save pendant transcripts to long-term memory",
+        default: true,
+      },
+      memoryFlushIntervalMs: {
+        type: "number" as const,
+        description: "How often to flush transcripts to memory (ms)",
+        default: 300000,
+      },
+      memoryFlushMinEntries: {
+        type: "number" as const,
+        description: "Minimum entries before flushing to memory",
+        default: 5,
+      },
+
+      // Location Settings
+      locationDefaultRadiusMeters: {
+        type: "number" as const,
+        description: "Default geofence radius for saved locations (meters)",
+        default: 100,
+      },
+      locationReminderMode: {
+        type: "string" as const,
+        enum: ["notification", "ai_message", "both"],
+        description: "How to alert on location-based reminders",
+        default: "both",
+      },
+
+      // Voice Activity Detection (Software Redundancy)
+      enableSoftwareVAD: {
+        type: "boolean" as const,
+        description: "Enable software VAD to skip silence (redundant with pendant hardware VAD)",
+        default: true,
+      },
+      vadEnergyThreshold: {
+        type: "number" as const,
+        description:
+          "RMS energy threshold for speech detection (0-1). Audio below this is considered silence.",
+        default: 0.01,
+      },
+      vadSpeechRatio: {
+        type: "number" as const,
+        description: "Minimum percentage of frames above threshold to consider speech (0-1)",
+        default: 0.1,
+      },
     },
   },
 
+  /**
+   * Register the pendant plugin with OpenClaw.
+   *
+   * @param api - The OpenClaw plugin API
+   */
   register(api: OpenClawPluginApi) {
-    // Store audio buffers per session
+    // ========================================================================
+    // Initialize Components
+    // ========================================================================
+
+    // Audio buffers per session
     const audioBuffers = new Map<string, AudioBuffer>();
 
     // Speaker diarization engine
@@ -116,50 +345,516 @@ const pendantPlugin = {
     // Pendant channel state per session
     const channelStates = new Map<string, PendantChannelState>();
 
-    // Voice profiles storage key
+    // Sliding transcript window per session
+    const transcriptWindows = new Map<string, TranscriptEntry[]>();
+
+    // Current GPS location (updated by geofence/location events)
+    let currentLocation: { latitude: number; longitude: number } | undefined;
+
+    // Create file-based storage
+    const stateDir = (api.runtime as any).state?.resolveStateDir?.(api.config) ?? undefined;
+    const storage = createStorage(stateDir);
+
+    // Task manager
+    const taskManager = new TaskManager(storage);
+
+    // Location manager
+    const locationManager = new LocationManager(storage);
+
+    // People profile manager
+    const peopleManager = new PeopleProfileManager(storage);
+
+    // Memory hook manager (will be initialized with workspace dir)
+    let memoryHook: MemoryHookManager | null = null;
+
+    // Storage keys
     const VOICE_PROFILES_KEY = "pendant:voice_profiles";
+
+    // ========================================================================
+    // Transcript Window Management
+    // ========================================================================
+
+    /**
+     * Add a transcript entry to the sliding window for a session.
+     * Maintains at most `windowSize` entries.
+     */
+    const addToTranscriptWindow = (
+      sessionKey: string,
+      entry: TranscriptEntry,
+      windowSize: number,
+    ) => {
+      let entries = transcriptWindows.get(sessionKey);
+      if (!entries) {
+        entries = [];
+        transcriptWindows.set(sessionKey, entries);
+      }
+      entries.push(entry);
+      // Trim to window size
+      if (entries.length > windowSize) {
+        entries.splice(0, entries.length - windowSize);
+      }
+    };
+
+    /**
+     * Get the current transcript window for a session.
+     */
+    const getTranscriptWindow = (sessionKey: string): TranscriptWindow => {
+      return {
+        entries: transcriptWindows.get(sessionKey) || [],
+        currentLocation,
+      };
+    };
+
+    // ========================================================================
+    // Load Persisted Data
+    // ========================================================================
 
     // Load voice profiles on startup
     (async () => {
       try {
-        const stored = await api.runtime.storage?.get(VOICE_PROFILES_KEY);
+        const stored = await storage.get(VOICE_PROFILES_KEY);
         if (stored) {
-          const profiles = JSON.parse(stored) as VoiceProfile[];
-          await diarizer.loadProfiles(profiles);
-          console.log(`[Pendant] Loaded ${profiles.length} voice profiles`);
+          const profiles = JSON.parse(stored);
+          if (Array.isArray(profiles)) {
+            await diarizer.loadProfiles(profiles as VoiceProfile[]);
+            console.log(`[Pendant] Loaded ${profiles.length} voice profiles`);
+          }
         }
       } catch (e) {
         console.error("[Pendant] Failed to load voice profiles:", e);
       }
     })();
 
-    // Save voice profiles periodically
+    // Initialize memory hook (deferred until we have workspace dir)
+    const initMemoryHook = (workspaceDir: string, config: Partial<MemoryHookConfig>) => {
+      if (!memoryHook) {
+        memoryHook = new MemoryHookManager(workspaceDir, config);
+        console.log("[Pendant] Memory hook initialized");
+      }
+    };
+
+    // Save voice profiles
     const saveProfiles = async () => {
       try {
         const profiles = diarizer.exportProfiles();
-        await api.runtime.storage?.set(VOICE_PROFILES_KEY, JSON.stringify(profiles));
+        await storage.set(VOICE_PROFILES_KEY, JSON.stringify(profiles));
       } catch (e) {
         console.error("[Pendant] Failed to save voice profiles:", e);
       }
     };
 
-    // Register pendant as a dedicated channel
+    // ========================================================================
+    // Event Emission Helper
+    // ========================================================================
+
+    /**
+     * Emit a pendant plugin event via the internal hook system.
+     * This makes the event available to all registered hook listeners.
+     */
+    const emitPendantEvent = async (
+      eventName: string,
+      sessionKey: string,
+      payload: Record<string, unknown>,
+    ) => {
+      try {
+        const event = createInternalHookEvent("gateway" as any, eventName, sessionKey, payload);
+        await triggerInternalHook(event);
+      } catch (e) {
+        console.error(`[Pendant] Failed to emit event ${eventName}:`, e);
+      }
+    };
+
+    // ========================================================================
+    // Register Channel
+    // ========================================================================
+
     api.registerChannel?.({
       id: "pendant",
       name: "BLE Pendant",
-      description: "Audio input from connected BLE pendant device",
+      description: "Audio input from connected BLE pendant device with intent detection",
       icon: "microphone",
-      capabilities: ["audio-input", "speaker-diarization", "voice-fingerprint"],
+      capabilities: { chatTypes: [] },
     });
 
-    // Register event handler for pendant audio
-    api.registerEvent(
+    // ========================================================================
+    // Process Compound Intents
+    // ========================================================================
+
+    /**
+     * Process a single detected intent and take appropriate action.
+     */
+    const processSingleIntent = async (
+      intent: ClassifiedIntent,
+      ctx: PluginConfigContext,
+      speakerId?: string,
+      speakerName?: string,
+    ) => {
+      const config = ctx.config as PendantConfig;
+
+      // Log intent event for logging/debugging
+      // Emit pendant.intent event
+      await emitPendantEvent("pendant.intent", ctx.sessionKey, {
+        intent: intent.type,
+        confidence: intent.confidence,
+        description: describeIntent(intent),
+        rawTranscript: intent.rawTranscript,
+      });
+
+      // Handle based on intent type
+      switch (intent.type) {
+        case "task_create":
+        case "task_create_location": {
+          if (!intent.extractedText) {
+            // Need more context - let AI handle
+            break;
+          }
+
+          // Resolve location trigger if present
+          let resolvedLocationTrigger:
+            | {
+                locationId?: string;
+                groupId?: string;
+                personLocationTag?: string;
+                triggerOn: "enter" | "exit" | "both";
+              }
+            | undefined;
+
+          if (intent.locationTrigger) {
+            resolvedLocationTrigger = {
+              triggerOn: intent.locationTrigger.triggerOn,
+            };
+
+            // Resolve location name to ID
+            if (intent.locationTrigger.locationName) {
+              const location = await locationManager.findLocationByName(
+                intent.locationTrigger.locationName,
+              );
+              if (location) {
+                resolvedLocationTrigger.locationId = location.id;
+              }
+            }
+
+            // Resolve group name to ID
+            if (intent.locationTrigger.groupName) {
+              const group = await locationManager.findGroupByName(intent.locationTrigger.groupName);
+              if (group) {
+                resolvedLocationTrigger.groupId = group.id;
+              }
+            }
+
+            // Resolve person location (e.g., "near John's house")
+            if (intent.locationTrigger.personName) {
+              const person = await peopleManager.findProfileByName(
+                intent.locationTrigger.personName,
+              );
+              if (person) {
+                // Use person's home location by default
+                resolvedLocationTrigger.personLocationTag = `${person.id}:home`;
+              }
+            }
+          }
+
+          // Create the task with resolved location
+          const task = await taskManager.createTask({
+            text: intent.extractedText,
+            dueAt: intent.dueTime,
+            locationTrigger: resolvedLocationTrigger,
+            speakerId,
+            speakerName,
+            source: "pendant",
+          });
+
+          // Emit pendant.task.created event
+          await emitPendantEvent("pendant.task.created", ctx.sessionKey, {
+            task: task as unknown as Record<string, unknown>,
+            intent: intent as unknown as Record<string, unknown>,
+          });
+          break;
+        }
+
+        case "task_list": {
+          const tasks = await taskManager.listTasks({ limit: 10 });
+          // Emit pendant.task.list event
+          await emitPendantEvent("pendant.task.list", ctx.sessionKey, {
+            tasks: tasks as unknown as Record<string, unknown>,
+            formatted: formatTaskList(tasks),
+          });
+          break;
+        }
+
+        case "task_complete": {
+          if (intent.taskIdentifier) {
+            // Try to find and complete the task by text match or position
+            const taskId = intent.taskIdentifier;
+            let completed = false;
+
+            // Try by position (e.g., "#1", "first")
+            const posMatch = taskId.match(/^#?(\d+)$/);
+            if (posMatch) {
+              const task = await taskManager.getTaskByPosition(parseInt(posMatch[1], 10));
+              if (task) {
+                completed = await taskManager.completeTask(task.id);
+              }
+            }
+
+            // Try by text match
+            if (!completed) {
+              const task = await taskManager.findTaskByText(taskId);
+              if (task) {
+                completed = await taskManager.completeTask(task.id);
+              }
+            }
+
+            // Try by ID directly
+            if (!completed) {
+              completed = await taskManager.completeTask(taskId);
+            }
+          }
+          break;
+        }
+
+        case "location_save": {
+          const locationName = intent.extractedText || (intent.params?.name as string);
+          if (locationName && currentLocation) {
+            const savedLoc = await locationManager.createLocation({
+              name: locationName,
+              latitude: currentLocation.latitude,
+              longitude: currentLocation.longitude,
+            });
+            await emitPendantEvent("pendant.location.saved", ctx.sessionKey, {
+              id: savedLoc.id,
+              name: savedLoc.name,
+              latitude: String(savedLoc.latitude),
+              longitude: String(savedLoc.longitude),
+              radiusMeters: String(savedLoc.radiusMeters ?? 100),
+            });
+          }
+          break;
+        }
+
+        case "location_group": {
+          const groupName = intent.params?.groupName as string;
+          if (groupName && currentLocation) {
+            // Find or create the group, then add current location to it
+            let group = await locationManager.findGroupByName(groupName);
+            if (!group) {
+              group = await locationManager.createGroup({ name: groupName });
+            }
+            // Save the current location first, then add to group
+            const loc = await locationManager.createLocation({
+              name: `${groupName} location`,
+              latitude: currentLocation.latitude,
+              longitude: currentLocation.longitude,
+            });
+            await locationManager.addToGroup(group.id, loc.id);
+          }
+          break;
+        }
+
+        case "person_location_set": {
+          const plsPersonName = intent.params?.personName as string;
+          const plsLocationType = intent.params?.locationType as string;
+          const plsLocationValue = intent.params?.locationValue as string | undefined;
+
+          if (plsPersonName && plsLocationType) {
+            let person = await peopleManager.findProfileByName(plsPersonName);
+            if (!person) {
+              person = await peopleManager.createProfile({ name: plsPersonName });
+            }
+            if (person) {
+              await peopleManager.addLocation(person.id, {
+                tag: plsLocationType,
+                customLocation: currentLocation
+                  ? {
+                      latitude: currentLocation.latitude,
+                      longitude: currentLocation.longitude,
+                      address: plsLocationValue,
+                    }
+                  : plsLocationValue
+                    ? { latitude: 0, longitude: 0, address: plsLocationValue }
+                    : undefined,
+              });
+              await emitPendantEvent("pendant.person.location.added", ctx.sessionKey, {
+                personId: person.id,
+                personName: plsPersonName,
+                tag: plsLocationType,
+                address: plsLocationValue ?? "",
+              });
+            }
+          }
+          break;
+        }
+
+        case "person_location_query": {
+          const plqPersonName = intent.params?.personName as string;
+          const plqLocationType = intent.params?.locationType as string;
+
+          if (plqPersonName) {
+            const person = await peopleManager.findProfileByName(plqPersonName);
+            if (person) {
+              if (plqLocationType) {
+                const loc = await peopleManager.getPersonLocation(person.id, plqLocationType);
+                await emitPendantEvent("channel.message", ctx.sessionKey, {
+                  channel: "pendant",
+                  type: "person_location_response",
+                  content: loc
+                    ? `${plqPersonName}'s ${plqLocationType}: ${loc.address || `(${loc.latitude}, ${loc.longitude})`}`
+                    : `No ${plqLocationType} location found for ${plqPersonName}`,
+                });
+              } else {
+                const locations = await peopleManager.getPersonLocations(person.id);
+                const formatted = locations
+                  .map((l: any) => `- ${l.tag}: ${l.address || `(${l.latitude}, ${l.longitude})`}`)
+                  .join("\n");
+                await emitPendantEvent("channel.message", ctx.sessionKey, {
+                  channel: "pendant",
+                  type: "person_location_response",
+                  content:
+                    locations.length > 0
+                      ? `${plqPersonName}'s locations:\n${formatted}`
+                      : `No locations found for ${plqPersonName}`,
+                });
+              }
+            }
+          }
+          break;
+        }
+
+        case "person_location_add": {
+          // Add a location tag to a person's profile
+          const personName = intent.params?.personName as string;
+          const tag = intent.params?.tag as string;
+          const useCurrentLoc = intent.params?.useCurrentLocation as boolean;
+
+          if (personName && tag) {
+            const person = await peopleManager.findProfileByName(personName);
+            if (person && useCurrentLoc && currentLocation) {
+              await peopleManager.addLocation(person.id, {
+                tag,
+                customLocation: {
+                  latitude: currentLocation.latitude,
+                  longitude: currentLocation.longitude,
+                },
+              });
+              // Emit pendant.person.location.added event
+              void emitPendantEvent("pendant.person.location.added", ctx.sessionKey, {
+                personId: person.id,
+                personName,
+                tag,
+                latitude: String(currentLocation.latitude),
+                longitude: String(currentLocation.longitude),
+              });
+            } else if (person) {
+              console.log(
+                `[Pendant] Person location add: ${personName} tag=${tag} (no current GPS)`,
+              );
+            } else {
+              console.log(`[Pendant] Person location add: person "${personName}" not found`);
+            }
+          }
+          break;
+        }
+
+        case "person_profile_update": {
+          // Update metadata on a person's profile
+          const pName = intent.params?.personName as string;
+          const pSpeakerId = intent.params?.speakerId as string | undefined;
+          const metadata = intent.params?.metadata as Record<string, unknown> | undefined;
+
+          if (pName) {
+            let person = await peopleManager.findProfileByName(pName);
+            if (!person && pSpeakerId) {
+              // Auto-create profile if we have a speaker ID
+              person = await peopleManager.createProfile({
+                name: pName,
+                voiceProfileId: pSpeakerId,
+                metadata,
+              });
+              console.log(`[Pendant] Auto-created profile for ${pName} (speaker ${pSpeakerId})`);
+            } else if (person && metadata) {
+              await peopleManager.updateProfile(person.id, {
+                metadata: { ...person.metadata, ...metadata },
+              });
+              console.log(`[Pendant] Updated ${pName}'s profile with metadata:`, metadata);
+            }
+          }
+          break;
+        }
+
+        case "memory_save": {
+          // Explicitly save to memory
+          if (memoryHook) {
+            await memoryHook.addEntry(ctx.sessionKey, {
+              timestamp: new Date().toISOString(),
+              speakerId,
+              speakerName,
+              text: intent.extractedText || intent.rawTranscript,
+              detectedIntent: "memory_save",
+            });
+          }
+          break;
+        }
+
+        // For other intents, let AI handle with context
+        default:
+          break;
+      }
+    };
+
+    /**
+     * Process a compound intent result -- iterates through all extracted intents
+     * and executes each action.
+     */
+    const processCompoundIntent = async (
+      compound: CompoundIntent,
+      ctx: PluginConfigContext,
+      speakerId?: string,
+      speakerName?: string,
+    ) => {
+      const config = ctx.config as PendantConfig;
+
+      if (compound.contextNotes) {
+        console.log("[Pendant] Context notes:", compound.contextNotes);
+      }
+
+      for (const intent of compound.intents) {
+        if (intent.type === "default") {
+          continue; // Skip default/conversation intents
+        }
+
+        if (intent.confidence < config.intentConfidenceThreshold) {
+          console.log(
+            `[Pendant] Skipping intent ${intent.type} (confidence ${intent.confidence.toFixed(2)} < threshold ${config.intentConfidenceThreshold})`,
+          );
+          continue;
+        }
+
+        await processSingleIntent(intent, ctx, speakerId, speakerName);
+      }
+    };
+
+    // ========================================================================
+    // Audio Event Handler
+    // ========================================================================
+
+    api.registerHook(
       "pendant.audio",
-      async (event, ctx: PluginConfigContext) => {
+      async (event: any, ctx: PluginConfigContext) => {
         const config = ctx.config as PendantConfig;
 
         if (!config.autoTranscribe) {
           return;
+        }
+
+        // Initialize memory hook if needed
+        if (config.autoSaveToMemory && !memoryHook) {
+          // Use workspace dir from context if available
+          const workspaceDir = (ctx as { workspaceDir?: string }).workspaceDir || process.cwd();
+          initMemoryHook(workspaceDir, {
+            enabled: true,
+            flushIntervalMs: config.memoryFlushIntervalMs,
+            flushMinEntries: config.memoryFlushMinEntries,
+          });
         }
 
         try {
@@ -189,7 +884,6 @@ const pendantPlugin = {
           buffer.totalBytes += pcmData.length;
 
           // Calculate buffer duration
-          // PCM16 = 2 bytes per sample, mono = 1 channel
           const bytesPerSecond = buffer.sampleRate * 2;
           const bufferDurationMs = (buffer.totalBytes / bytesPerSecond) * 1000;
 
@@ -201,12 +895,31 @@ const pendantPlugin = {
             // Clear buffer
             audioBuffers.delete(ctx.sessionKey);
 
+            // Software VAD check (redundant with pendant hardware VAD)
+            if (config.enableSoftwareVAD) {
+              const vadResult = detectSpeech(
+                combinedPcm,
+                config.vadEnergyThreshold,
+                config.vadSpeechRatio,
+              );
+
+              if (!vadResult.hasSpeech) {
+                // Skip transcription - audio is mostly silence
+                console.log(
+                  `[Pendant] VAD: Skipping silence (energy=${vadResult.energy.toFixed(4)}, ` +
+                    `speechRatio=${(vadResult.speechFrameRatio * 100).toFixed(1)}%)`,
+                );
+                return;
+              }
+
+              console.log(
+                `[Pendant] VAD: Speech detected (energy=${vadResult.energy.toFixed(4)}, ` +
+                  `speechRatio=${(vadResult.speechFrameRatio * 100).toFixed(1)}%)`,
+              );
+            }
+
             // Transcribe
-            const transcript = await transcribeAudio(
-              combinedPcm,
-              buffer.sampleRate,
-              config
-            );
+            const transcript = await transcribeAudio(combinedPcm, buffer.sampleRate, config, api);
 
             if (transcript && transcript.trim()) {
               let speakerInfo: SpeakerSegment | null = null;
@@ -214,63 +927,115 @@ const pendantPlugin = {
 
               // Run speaker diarization if enabled
               if (config.enableSpeakerDiarization) {
-                const segments = await diarizer.processAudio(
-                  combinedPcm,
-                  buffer.sampleRate,
-                  {
-                    sessionKey: ctx.sessionKey,
-                    conversationContext: transcript,
-                  }
-                );
+                const segments = await diarizer.processAudio(combinedPcm, buffer.sampleRate, {
+                  sessionKey: ctx.sessionKey,
+                  conversationContext: transcript,
+                });
 
                 if (segments.length > 0) {
-                  speakerInfo = segments[0];
-                  const profiles = diarizer.getProfiles();
-                  const matchedProfile = profiles.find(
-                    (p) => p.id === speakerInfo?.speakerId
-                  );
-                  speakerName = matchedProfile?.personName || null;
+                  speakerInfo = segments[0] ?? null;
+                  if (speakerInfo) {
+                    const profiles = diarizer.getProfiles();
+                    const matchedProfile = profiles.find((p) => p.id === speakerInfo!.speakerId);
+                    speakerName = matchedProfile?.personName || null;
 
-                  // Update channel state
-                  let state = channelStates.get(ctx.sessionKey);
-                  if (!state) {
-                    state = {
-                      isActive: true,
-                      currentSpeaker: null,
-                      speakerHistory: [],
-                      totalAudioMs: 0,
-                      sessionStartTime: new Date().toISOString(),
-                    };
-                    channelStates.set(ctx.sessionKey, state);
-                  }
+                    // Update channel state
+                    let state = channelStates.get(ctx.sessionKey);
+                    if (!state) {
+                      state = {
+                        isActive: true,
+                        currentSpeaker: null,
+                        speakerHistory: [],
+                        totalAudioMs: 0,
+                        sessionStartTime: new Date().toISOString(),
+                      };
+                      channelStates.set(ctx.sessionKey, state);
+                    }
 
-                  state.currentSpeaker = speakerInfo.speakerId;
-                  state.totalAudioMs += bufferDurationMs;
-                  state.speakerHistory.push({
-                    speakerId: speakerInfo.speakerId,
-                    personName: speakerName || undefined,
-                    timestamp: new Date().toISOString(),
-                    durationMs: bufferDurationMs,
-                  });
+                    state.currentSpeaker = speakerInfo.speakerId;
+                    state.totalAudioMs += bufferDurationMs;
+                    state.speakerHistory.push({
+                      speakerId: speakerInfo.speakerId,
+                      personName: speakerName || undefined,
+                      timestamp: new Date().toISOString(),
+                      durationMs: bufferDurationMs,
+                    });
 
-                  // Save profiles periodically
-                  if (state.speakerHistory.length % 10 === 0) {
-                    await saveProfiles();
+                    // Save profiles periodically
+                    if (state.speakerHistory.length % 10 === 0) {
+                      await saveProfiles();
+                    }
                   }
                 }
+              }
+
+              // Add to sliding transcript window
+              const windowSize = config.transcriptWindowSize || 10;
+              const transcriptEntry: TranscriptEntry = {
+                text: transcript.trim(),
+                speakerId: speakerInfo?.speakerId,
+                speakerName: speakerName || undefined,
+                timestamp: new Date().toISOString(),
+              };
+              addToTranscriptWindow(ctx.sessionKey, transcriptEntry, windowSize);
+
+              // Classify intent if enabled
+              let compoundResult: CompoundIntent | null = null;
+              if (config.enableIntentDetection) {
+                const window = getTranscriptWindow(ctx.sessionKey);
+
+                compoundResult = await classifyTranscript(window, api, {
+                  confidenceThreshold: config.intentConfidenceThreshold,
+                  useLLMAlways: config.intentUseLLMAlways ?? false,
+                });
+
+                // Process all extracted intents
+                await processCompoundIntent(
+                  compoundResult,
+                  ctx,
+                  speakerInfo?.speakerId,
+                  speakerName || undefined,
+                );
               }
 
               // Format transcript with speaker info
               const formattedTranscript = speakerName
                 ? `[${speakerName}]: ${transcript.trim()}`
                 : speakerInfo
-                ? `[Speaker ${speakerInfo.speakerId.slice(-6)}]: ${transcript.trim()}`
-                : transcript.trim();
+                  ? `[Speaker ${speakerInfo.speakerId.slice(-6)}]: ${transcript.trim()}`
+                  : transcript.trim();
 
-              // Send transcript via pendant channel
-              api.runtime.events.emit("pendant.transcript", {
+              // Add to memory buffer
+              if (config.autoSaveToMemory && memoryHook) {
+                const primaryIntent = compoundResult?.intents.find((i) => i.type !== "default");
+                await memoryHook.addEntry(ctx.sessionKey, {
+                  timestamp: new Date().toISOString(),
+                  speakerId: speakerInfo?.speakerId,
+                  speakerName: speakerName || undefined,
+                  text: transcript.trim(),
+                  confidence: speakerInfo?.confidence,
+                  durationMs: bufferDurationMs,
+                  detectedIntent: primaryIntent?.type,
+                });
+              }
+
+              // Build intent summary for logging
+              const intentSummary = compoundResult
+                ? {
+                    intentCount: compoundResult.intents.length,
+                    intents: compoundResult.intents.map((i) => ({
+                      type: i.type,
+                      confidence: i.confidence,
+                      description: describeIntent(i),
+                      needsClarification: needsAIClarification(i),
+                    })),
+                    contextNotes: compoundResult.contextNotes,
+                  }
+                : null;
+
+              // Emit pendant.transcript event
+              await emitPendantEvent("pendant.transcript", ctx.sessionKey, {
                 channel: "pendant",
-                sessionKey: ctx.sessionKey,
                 transcript: transcript.trim(),
                 formattedTranscript,
                 speaker: speakerInfo
@@ -281,22 +1046,24 @@ const pendantPlugin = {
                       isNew: speakerInfo.speakerId.startsWith("voice_"),
                     }
                   : null,
+                classification: intentSummary,
                 durationMs: bufferDurationMs,
                 timestamp: new Date().toISOString(),
               });
 
-              // Emit event for AI to process
-              // This creates a distinct input channel separate from direct messages
-              api.runtime.events.emit("channel.message", {
+              // Emit channel.message event for AI to process
+              await emitPendantEvent("channel.message", ctx.sessionKey, {
                 channel: "pendant",
                 type: "audio_transcript",
-                sessionKey: ctx.sessionKey,
                 content: formattedTranscript,
                 metadata: {
                   source: "pendant",
                   speakerId: speakerInfo?.speakerId,
                   speakerName,
                   audioMs: bufferDurationMs,
+                  intentCount: compoundResult?.intents.length ?? 0,
+                  intents: compoundResult?.intents.map((i: any) => i.type),
+                  contextNotes: compoundResult?.contextNotes,
                 },
               });
             }
@@ -304,22 +1071,123 @@ const pendantPlugin = {
         } catch (error) {
           console.error("[Pendant] Audio processing error:", error);
         }
-      }
+      },
+      { name: "pendant-audio" },
     );
 
-    // Register CLI commands for pendant management
+    // ========================================================================
+    // Location Event Handlers
+    // ========================================================================
+
+    // Handle GPS location updates from Android
+    api.registerHook(
+      "pendant.location.update",
+      async (event: any, _ctx: any) => {
+        const { latitude, longitude } = event.payload as {
+          latitude: number;
+          longitude: number;
+        };
+        if (typeof latitude === "number" && typeof longitude === "number") {
+          currentLocation = { latitude, longitude };
+        }
+      },
+      { name: "pendant-location-update" },
+    );
+
+    // Handle geofence enter events from Android
+    api.registerHook(
+      "pendant.geofence.enter",
+      async (event: any, ctx: any) => {
+        const { locationId, groupId, personLocationTag } = event.payload as {
+          locationId?: string;
+          groupId?: string;
+          personLocationTag?: string;
+        };
+
+        // Find matching tasks (checks locationId, groupId, and personLocationTag)
+        const tasks = await taskManager.getTasksForLocation(
+          locationId,
+          groupId,
+          "enter",
+          personLocationTag,
+        );
+
+        for (const task of tasks) {
+          // Mark as triggered
+          await taskManager.markTriggered(task.id);
+
+          // Emit pendant.task.triggered event
+          await emitPendantEvent("pendant.task.triggered", ctx.sessionKey, {
+            task: task as unknown as Record<string, unknown>,
+            triggerType: "enter",
+            locationId: locationId ?? "",
+            groupId: groupId ?? "",
+            personLocationTag: personLocationTag ?? "",
+          });
+        }
+      },
+      { name: "pendant-geofence-enter" },
+    );
+
+    // Handle geofence exit events from Android
+    api.registerHook(
+      "pendant.geofence.exit",
+      async (event: any, ctx: any) => {
+        const { locationId, groupId, personLocationTag } = event.payload as {
+          locationId?: string;
+          groupId?: string;
+          personLocationTag?: string;
+        };
+
+        const tasks = await taskManager.getTasksForLocation(
+          locationId,
+          groupId,
+          "exit",
+          personLocationTag,
+        );
+
+        for (const task of tasks) {
+          await taskManager.markTriggered(task.id);
+
+          // Emit pendant.task.triggered event
+          await emitPendantEvent("pendant.task.triggered", ctx.sessionKey, {
+            task: task as unknown as Record<string, unknown>,
+            triggerType: "exit",
+            locationId: locationId ?? "",
+            groupId: groupId ?? "",
+            personLocationTag: personLocationTag ?? "",
+          });
+        }
+      },
+      { name: "pendant-geofence-exit" },
+    );
+
+    // ========================================================================
+    // CLI Commands
+    // ========================================================================
+
     api.registerCli(
       ({ program }) => {
         const pendantCmd = program
           .command("pendant")
-          .description("Manage BLE pendant devices");
+          .description("Manage BLE pendant devices and tasks");
 
         pendantCmd
           .command("status")
           .description("Show pendant connection status")
           .action(async () => {
-            // This would query the connected Android node for pendant status
             console.log("Pendant status: (query node for status)");
+          });
+
+        pendantCmd
+          .command("tasks")
+          .description("List pendant tasks")
+          .option("--all", "Include completed tasks")
+          .action(async (options: { all?: boolean }) => {
+            const tasks = await taskManager.listTasks({
+              includeCompleted: options.all,
+            });
+            console.log(formatTaskList(tasks));
           });
 
         pendantCmd
@@ -330,12 +1198,17 @@ const pendantPlugin = {
             console.log(`Would transcribe ${file} using ${options.provider}`);
           });
       },
-      { commands: ["pendant"] }
+      { commands: ["pendant"] },
     );
 
-    // Register tool for voice profile management
+    // ========================================================================
+    // Register Tools
+    // ========================================================================
+
+    // Voice profile tools
     api.registerTool(
       () => ({
+        label: "List Voice Profiles",
         name: "voice_profile_list",
         description: "List all known voice profiles (people whose voices have been fingerprinted)",
         parameters: {
@@ -343,7 +1216,7 @@ const pendantPlugin = {
           properties: {},
           required: [],
         },
-        async execute() {
+        async execute(_toolCallId: string, _params: Record<string, never>) {
           const profiles = diarizer.getProfiles();
           return {
             count: profiles.length,
@@ -359,11 +1232,12 @@ const pendantPlugin = {
           };
         },
       }),
-      { names: ["voice_profile_list"] }
+      { names: ["voice_profile_list"] },
     );
 
     api.registerTool(
       () => ({
+        label: "Identify Voice Profile",
         name: "voice_profile_identify",
         description: "Assign a name/identity to a voice profile (link a voice to a person)",
         parameters: {
@@ -384,15 +1258,18 @@ const pendantPlugin = {
           },
           required: ["voiceProfileId", "personName"],
         },
-        async execute(params: {
-          voiceProfileId: string;
-          personName: string;
-          personId?: string;
-        }) {
+        async execute(
+          _toolCallId: string,
+          params: {
+            voiceProfileId: string;
+            personName: string;
+            personId?: string;
+          },
+        ) {
           await diarizer.linkToPerson(
             params.voiceProfileId,
             params.personId || params.voiceProfileId,
-            params.personName
+            params.personName,
           );
           await saveProfiles();
 
@@ -402,11 +1279,13 @@ const pendantPlugin = {
           };
         },
       }),
-      { names: ["voice_profile_identify"] }
+      { names: ["voice_profile_identify"] },
     );
 
+    // Channel status tool
     api.registerTool(
       () => ({
+        label: "Pendant Channel Status",
         name: "pendant_channel_status",
         description: "Get status of the pendant audio channel including speaker history",
         parameters: {
@@ -419,8 +1298,12 @@ const pendantPlugin = {
           },
           required: [],
         },
-        async execute(params: { sessionKey?: string }, ctx) {
-          const key = params.sessionKey || ctx.sessionKey;
+        async execute(
+          _toolCallId: string,
+          params: { sessionKey?: string },
+          ctx: PluginToolContext,
+        ) {
+          const key = params.sessionKey || ctx.sessionKey || "";
           const state = channelStates.get(key);
 
           if (!state) {
@@ -430,7 +1313,6 @@ const pendantPlugin = {
             };
           }
 
-          // Get unique speakers from history
           const uniqueSpeakers = new Map<
             string,
             { name?: string; totalMs: number; lastSeen: string }
@@ -454,23 +1336,22 @@ const pendantPlugin = {
             currentSpeaker: state.currentSpeaker,
             sessionStartTime: state.sessionStartTime,
             totalAudioMs: state.totalAudioMs,
-            uniqueSpeakers: Array.from(uniqueSpeakers.entries()).map(
-              ([id, data]) => ({
-                id,
-                name: data.name,
-                totalSpeakingMs: data.totalMs,
-                lastSeen: data.lastSeen,
-              })
-            ),
+            uniqueSpeakers: Array.from(uniqueSpeakers.entries()).map(([id, data]) => ({
+              id,
+              name: data.name,
+              totalSpeakingMs: data.totalMs,
+              lastSeen: data.lastSeen,
+            })),
           };
         },
       }),
-      { names: ["pendant_channel_status"] }
+      { names: ["pendant_channel_status"] },
     );
 
-    // Register tool for AI to control pendant
+    // Pendant control tool
     api.registerTool(
       () => ({
+        label: "Pendant Control",
         name: "pendant_control",
         description: "Control BLE pendant device connected to Android node",
         parameters: {
@@ -488,67 +1369,188 @@ const pendantPlugin = {
           },
           required: ["action"],
         },
-        async execute(params: { action: string; address?: string }, ctx) {
-          // This would invoke the pendant command on the Android node
+        async execute(
+          _toolCallId: string,
+          params: { action: string; address?: string },
+          ctx: PluginToolContext,
+        ) {
           const command = `pendant.${params.action}`;
-          const paramsJson = params.address
-            ? JSON.stringify({ address: params.address })
-            : "{}";
+          const paramsJson = params.address ? JSON.stringify({ address: params.address }) : "{}";
 
-          try {
-            // Invoke on connected Android node
-            const result = await api.runtime.nodes.invoke(
-              ctx.sessionKey,
-              command,
-              paramsJson
-            );
-            return result;
-          } catch (error) {
-            return {
-              error: `Failed to execute pendant.${params.action}: ${error}`,
-            };
-          }
+          // Note: api.runtime.nodes doesn't exist, stub the response
+          console.log(`[Pendant] Would invoke node command: ${command} with params: ${paramsJson}`);
+          return {
+            success: false,
+            error: `Node invocation not available. Command: ${command}`,
+            sessionKey: ctx.sessionKey,
+          };
         },
       }),
-      { names: ["pendant_control"] }
+      { names: ["pendant_control"] },
+    );
+
+    // Register task tools
+    const taskTools = createTaskTools(taskManager, (task) => {
+      void emitPendantEvent("pendant.task.created", "", {
+        task: task as unknown as Record<string, unknown>,
+      });
+    });
+    for (const tool of taskTools) {
+      api.registerTool(() => tool, { names: [tool.name] });
+    }
+
+    // Register location tools
+    const locationTools = createLocationTools(locationManager, {
+      onLocationSaved: (location) => {
+        void emitPendantEvent("pendant.location.saved", "", {
+          id: location.id,
+          name: location.name,
+          latitude: String(location.latitude),
+          longitude: String(location.longitude),
+          radiusMeters: String(location.radiusMeters ?? 100),
+          address: location.address ?? "",
+          starred: String(location.starred ?? false),
+        });
+      },
+      onLocationUpdated: (location) => {
+        void emitPendantEvent("pendant.location.updated", "", {
+          id: location.id,
+          name: location.name,
+          latitude: String(location.latitude),
+          longitude: String(location.longitude),
+          radiusMeters: String(location.radiusMeters ?? 100),
+          address: location.address ?? "",
+          starred: String(location.starred ?? false),
+        });
+      },
+      onLocationDeleted: (locationId) => {
+        void emitPendantEvent("pendant.location.deleted", "", {
+          id: locationId,
+        });
+      },
+    });
+    for (const tool of locationTools) {
+      api.registerTool(() => tool, { names: [tool.name] });
+    }
+
+    // Register people profile tools
+    const peopleTools = createPeopleTools(peopleManager);
+    for (const tool of peopleTools) {
+      api.registerTool(() => tool, { names: [tool.name] });
+    }
+
+    // Register memory tools (lazy init)
+    api.registerTool(
+      () => ({
+        label: "Pendant Memory Status",
+        name: "pendant_memory_status",
+        description: "Get status and statistics of the pendant memory auto-save system",
+        parameters: {
+          type: "object" as const,
+          properties: {},
+          required: [],
+        },
+        async execute(_toolCallId: string, _params: Record<string, never>) {
+          if (!memoryHook) {
+            return {
+              enabled: false,
+              message: "Memory hook not initialized",
+            };
+          }
+          return {
+            enabled: true,
+            stats: memoryHook.getStats(),
+          };
+        },
+      }),
+      { names: ["pendant_memory_status"] },
+    );
+
+    api.registerTool(
+      () => ({
+        label: "Pendant Memory Flush",
+        name: "pendant_memory_flush",
+        description: "Manually flush all pending transcripts to memory files",
+        parameters: {
+          type: "object" as const,
+          properties: {
+            sessionKey: {
+              type: "string" as const,
+              description: "Flush only this session (optional)",
+            },
+          },
+          required: [],
+        },
+        async execute(_toolCallId: string, params: { sessionKey?: string }) {
+          if (!memoryHook) {
+            return {
+              success: false,
+              error: "Memory hook not initialized",
+            };
+          }
+
+          if (params.sessionKey) {
+            await memoryHook.flushBuffer(params.sessionKey);
+          } else {
+            await memoryHook.flushAllBuffers();
+          }
+
+          return {
+            success: true,
+            message: params.sessionKey
+              ? `Flushed buffer for session ${params.sessionKey}`
+              : "Flushed all buffers",
+          };
+        },
+      }),
+      { names: ["pendant_memory_flush"] },
     );
   },
 };
 
+// ============================================================================
+// STT Functions
+// ============================================================================
+
 /**
  * Transcribe PCM audio using configured STT provider.
+ *
+ * @param pcmData - Raw PCM audio data
+ * @param sampleRate - Sample rate in Hz
+ * @param config - Plugin configuration
+ * @returns Transcribed text or null if transcription failed
  */
 async function transcribeAudio(
   pcmData: Buffer,
   sampleRate: number,
-  config: PendantConfig
+  config: PendantConfig,
+  api: OpenClawPluginApi,
 ): Promise<string | null> {
   switch (config.sttProvider) {
     case "deepgram":
       return transcribeWithDeepgram(pcmData, sampleRate, config.deepgramApiKey);
 
     case "whisper":
-      return transcribeWithWhisper(
-        pcmData,
-        sampleRate,
-        config.whisperEndpoint
-      );
+      return transcribeWithWhisper(pcmData, sampleRate, config.whisperEndpoint);
 
     case "gateway":
     default:
-      // Use gateway's built-in STT (if available)
-      // This would integrate with the gateway's existing voice infrastructure
-      return transcribeWithGateway(pcmData, sampleRate);
+      return transcribeWithGateway(pcmData, sampleRate, api);
   }
 }
 
 /**
- * Transcribe using Deepgram streaming API.
+ * Transcribe using Deepgram API.
+ *
+ * @param pcmData - Raw PCM audio data
+ * @param sampleRate - Sample rate in Hz
+ * @param apiKey - Deepgram API key
+ * @returns Transcribed text or null
  */
 async function transcribeWithDeepgram(
   pcmData: Buffer,
   sampleRate: number,
-  apiKey?: string
+  apiKey?: string,
 ): Promise<string | null> {
   if (!apiKey) {
     console.error("[Pendant] Deepgram API key not configured");
@@ -556,20 +1558,16 @@ async function transcribeWithDeepgram(
   }
 
   try {
-    // Convert PCM to WAV for Deepgram
     const wavData = pcmToWav(pcmData, sampleRate);
 
-    const response = await fetch(
-      `https://api.deepgram.com/v1/listen?model=nova-2&language=en`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Token ${apiKey}`,
-          "Content-Type": "audio/wav",
-        },
-        body: wavData,
-      }
-    );
+    const response = await fetch(`https://api.deepgram.com/v1/listen?model=nova-2&language=en`, {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${apiKey}`,
+        "Content-Type": "audio/wav",
+      },
+      body: new Uint8Array(wavData),
+    });
 
     if (!response.ok) {
       console.error("[Pendant] Deepgram error:", response.status);
@@ -586,11 +1584,16 @@ async function transcribeWithDeepgram(
 
 /**
  * Transcribe using Whisper API.
+ *
+ * @param pcmData - Raw PCM audio data
+ * @param sampleRate - Sample rate in Hz
+ * @param endpoint - Whisper API endpoint
+ * @returns Transcribed text or null
  */
 async function transcribeWithWhisper(
   pcmData: Buffer,
   sampleRate: number,
-  endpoint?: string
+  endpoint?: string,
 ): Promise<string | null> {
   if (!endpoint) {
     console.error("[Pendant] Whisper endpoint not configured");
@@ -601,7 +1604,11 @@ async function transcribeWithWhisper(
     const wavData = pcmToWav(pcmData, sampleRate);
 
     const formData = new FormData();
-    formData.append("file", new Blob([wavData], { type: "audio/wav" }), "audio.wav");
+    formData.append(
+      "file",
+      new Blob([new Uint8Array(wavData)], { type: "audio/wav" }),
+      "audio.wav",
+    );
     formData.append("model", "whisper-1");
 
     const response = await fetch(endpoint, {
@@ -623,22 +1630,247 @@ async function transcribeWithWhisper(
 }
 
 /**
- * Transcribe using gateway's built-in STT.
+ * Transcribe using the gateway's configured audio transcription provider.
+ *
+ * Resolves the best available STT provider from the OpenClaw config by
+ * checking for API keys in order of preference: Groq, OpenAI, Deepgram.
+ * Uses the OpenAI-compatible /audio/transcriptions endpoint for Groq and
+ * OpenAI, and the Deepgram /v1/listen endpoint for Deepgram.
+ *
+ * @param pcmData - Raw PCM audio data
+ * @param sampleRate - Sample rate in Hz
+ * @param api - The OpenClaw plugin API
+ * @returns Transcribed text or null
  */
 async function transcribeWithGateway(
   pcmData: Buffer,
-  sampleRate: number
+  sampleRate: number,
+  api: OpenClawPluginApi,
 ): Promise<string | null> {
-  // Placeholder - would integrate with gateway's existing voice/STT infrastructure
-  // This could use the same STT pipeline as voice calls
-  console.log(
-    `[Pendant] Gateway STT: would transcribe ${pcmData.length} bytes at ${sampleRate}Hz`
-  );
-  return null;
+  try {
+    const wavData = pcmToWav(pcmData, sampleRate);
+
+    // Load the full gateway config to resolve audio provider and API keys
+    const cfg = api.runtime.config.loadConfig();
+
+    // Audio provider resolution order (same as AUTO_AUDIO_KEY_PROVIDERS)
+    const providerCandidates: Array<{
+      id: string;
+      envVar: string;
+      baseUrl: string;
+      model: string;
+      format: "openai" | "deepgram";
+    }> = [
+      {
+        id: "groq",
+        envVar: "GROQ_API_KEY",
+        baseUrl: "https://api.groq.com/openai/v1",
+        model: "whisper-large-v3-turbo",
+        format: "openai",
+      },
+      {
+        id: "openai",
+        envVar: "OPENAI_API_KEY",
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4o-mini-transcribe",
+        format: "openai",
+      },
+      {
+        id: "deepgram",
+        envVar: "DEEPGRAM_API_KEY",
+        baseUrl: "https://api.deepgram.com/v1",
+        model: "nova-3",
+        format: "deepgram",
+      },
+    ];
+
+    // Check for provider-specific config overrides
+    const mediaAudioConfig = (cfg as any).tools?.media?.audio;
+    const providerOverrides = (cfg as any).models?.providers;
+
+    // Find the first provider with a configured API key
+    let resolvedProvider: (typeof providerCandidates)[number] | null = null;
+    let apiKey: string | null = null;
+
+    // If media audio config specifies a preferred provider, try it first
+    if (mediaAudioConfig?.models?.length) {
+      const preferred = mediaAudioConfig.models[0];
+      if (preferred?.provider) {
+        const candidate = providerCandidates.find((p) => p.id === preferred.provider);
+        if (candidate) {
+          const key = process.env[candidate.envVar] || providerOverrides?.[candidate.id]?.apiKey;
+          if (key) {
+            resolvedProvider = candidate;
+            apiKey = key;
+            if (preferred.model) {
+              resolvedProvider = { ...resolvedProvider, model: preferred.model };
+            }
+          }
+        }
+      }
+    }
+
+    // Fall back to checking providers in order
+    if (!resolvedProvider) {
+      for (const candidate of providerCandidates) {
+        const key = process.env[candidate.envVar] || providerOverrides?.[candidate.id]?.apiKey;
+        if (key) {
+          resolvedProvider = candidate;
+          apiKey = key;
+          break;
+        }
+      }
+    }
+
+    if (!resolvedProvider || !apiKey) {
+      console.error(
+        "[Pendant] Gateway STT: no audio transcription provider configured. " +
+          "Set one of: GROQ_API_KEY, OPENAI_API_KEY, or DEEPGRAM_API_KEY",
+      );
+      return null;
+    }
+
+    // Apply base URL overrides from config
+    const providerConfig = providerOverrides?.[resolvedProvider.id];
+    const baseUrl = providerConfig?.baseUrl || resolvedProvider.baseUrl;
+
+    console.log(
+      `[Pendant] Gateway STT: transcribing ${pcmData.length} bytes at ${sampleRate}Hz via ${resolvedProvider.id} (${resolvedProvider.model})`,
+    );
+
+    if (resolvedProvider.format === "openai") {
+      // OpenAI-compatible endpoint (works for OpenAI and Groq)
+      const formData = new FormData();
+      formData.append(
+        "file",
+        new Blob([new Uint8Array(wavData)], { type: "audio/wav" }),
+        "audio.wav",
+      );
+      formData.append("model", resolvedProvider.model);
+
+      const response = await fetch(`${baseUrl}/audio/transcriptions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        console.error(
+          `[Pendant] Gateway STT (${resolvedProvider.id}): HTTP ${response.status}${detail ? ": " + detail : ""}`,
+        );
+        return null;
+      }
+
+      const result = await response.json();
+      return (result as { text?: string }).text?.trim() || null;
+    } else {
+      // Deepgram endpoint
+      const url = new URL(`${baseUrl}/listen`);
+      url.searchParams.set("model", resolvedProvider.model);
+
+      const response = await fetch(url.toString(), {
+        method: "POST",
+        headers: {
+          Authorization: `Token ${apiKey}`,
+          "Content-Type": "audio/wav",
+        },
+        body: new Uint8Array(wavData),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        console.error(
+          `[Pendant] Gateway STT (${resolvedProvider.id}): HTTP ${response.status}${detail ? ": " + detail : ""}`,
+        );
+        return null;
+      }
+
+      const result = await response.json();
+      return (result as any).results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() || null;
+    }
+  } catch (error) {
+    console.error("[Pendant] Gateway STT transcription error:", error);
+    return null;
+  }
+}
+
+/**
+ * Software Voice Activity Detection (VAD).
+ *
+ * Analyzes PCM audio to detect if it contains speech or is mostly silence.
+ * Uses RMS (Root Mean Square) energy as a simple but effective metric.
+ *
+ * @param pcmData - Raw PCM audio data (16-bit signed, little-endian)
+ * @param energyThreshold - RMS threshold for speech (0-1, default 0.01)
+ * @param speechRatio - Minimum ratio of frames above threshold (0-1, default 0.1)
+ * @returns true if audio likely contains speech, false if silence
+ */
+function detectSpeech(
+  pcmData: Buffer,
+  energyThreshold: number = 0.01,
+  speechRatio: number = 0.1,
+): { hasSpeech: boolean; energy: number; speechFrameRatio: number } {
+  // PCM16 = 2 bytes per sample
+  const sampleCount = Math.floor(pcmData.length / 2);
+  if (sampleCount === 0) {
+    return { hasSpeech: false, energy: 0, speechFrameRatio: 0 };
+  }
+
+  // Analyze in frames of ~20ms (assuming 16kHz = 320 samples per frame)
+  const frameSize = 320;
+  const frameCount = Math.floor(sampleCount / frameSize);
+  if (frameCount === 0) {
+    return { hasSpeech: false, energy: 0, speechFrameRatio: 0 };
+  }
+
+  let totalEnergy = 0;
+  let speechFrames = 0;
+
+  for (let frame = 0; frame < frameCount; frame++) {
+    let frameEnergy = 0;
+    const frameStart = frame * frameSize;
+
+    // Calculate RMS energy for this frame
+    for (let i = 0; i < frameSize; i++) {
+      const byteOffset = (frameStart + i) * 2;
+      if (byteOffset + 1 < pcmData.length) {
+        // Read 16-bit signed sample (little-endian)
+        const sample = pcmData.readInt16LE(byteOffset);
+        // Normalize to -1..1 range
+        const normalized = sample / 32768;
+        frameEnergy += normalized * normalized;
+      }
+    }
+
+    // RMS for this frame
+    const rms = Math.sqrt(frameEnergy / frameSize);
+    totalEnergy += rms;
+
+    // Count frames above threshold
+    if (rms > energyThreshold) {
+      speechFrames++;
+    }
+  }
+
+  const avgEnergy = totalEnergy / frameCount;
+  const actualSpeechRatio = speechFrames / frameCount;
+
+  return {
+    hasSpeech: actualSpeechRatio >= speechRatio,
+    energy: avgEnergy,
+    speechFrameRatio: actualSpeechRatio,
+  };
 }
 
 /**
  * Convert PCM data to WAV format.
+ *
+ * @param pcmData - Raw PCM audio data
+ * @param sampleRate - Sample rate in Hz
+ * @returns WAV file buffer
  */
 function pcmToWav(pcmData: Buffer, sampleRate: number): Buffer {
   const channels = 1;
@@ -655,8 +1887,8 @@ function pcmToWav(pcmData: Buffer, sampleRate: number): Buffer {
 
   // fmt subchunk
   header.write("fmt ", 12);
-  header.writeUInt32LE(16, 16); // Subchunk1 size
-  header.writeUInt16LE(1, 20); // Audio format (PCM)
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
   header.writeUInt16LE(channels, 22);
   header.writeUInt32LE(sampleRate, 24);
   header.writeUInt32LE(byteRate, 28);
@@ -671,3 +1903,30 @@ function pcmToWav(pcmData: Buffer, sampleRate: number): Buffer {
 }
 
 export default pendantPlugin;
+
+// Re-export types for consumers
+export type { PendantConfig, PendantAudioEvent, AudioBuffer, PendantChannelState };
+
+export {
+  classifyIntent,
+  classifyTranscript,
+  classifyWithLLM,
+  type ClassifiedIntent,
+  type CompoundIntent,
+  type TranscriptWindow,
+  type TranscriptEntry,
+  type ClassifyConfig,
+  type IntentType,
+} from "./intent-classifier.js";
+export { TaskManager, type Task, type CreateTaskParams } from "./tasks.js";
+export { LocationManager, type SavedLocation, type LocationGroup } from "./locations.js";
+export {
+  PeopleProfileManager,
+  type PersonProfile,
+  type PersonLocation,
+} from "./people-profiles.js";
+export {
+  MemoryHookManager,
+  type MemoryHookConfig,
+  type TranscriptEntry as MemoryTranscriptEntry,
+} from "./memory-hook.js";

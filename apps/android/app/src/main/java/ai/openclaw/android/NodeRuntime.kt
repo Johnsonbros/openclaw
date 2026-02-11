@@ -1,6 +1,7 @@
 package ai.openclaw.android
 
 import android.Manifest
+import android.util.Log
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
@@ -39,6 +40,11 @@ import ai.openclaw.android.protocol.OpenClawPendantCommand
 import ai.openclaw.android.protocol.OpenClawScreenCommand
 import ai.openclaw.android.protocol.OpenClawLocationCommand
 import ai.openclaw.android.protocol.OpenClawSmsCommand
+import ai.openclaw.android.location.GeofenceCallback
+import ai.openclaw.android.location.GeofenceEvent
+import ai.openclaw.android.location.LocationPersistence
+import ai.openclaw.android.location.SavedLocation
+import ai.openclaw.android.location.LocationManager as GeofenceLocationManager
 import ai.openclaw.android.voice.TalkModeManager
 import ai.openclaw.android.voice.VoiceWakeManager
 import kotlinx.coroutines.CoroutineScope
@@ -75,6 +81,7 @@ class NodeRuntime(context: Context) {
   val screenRecorder = ScreenRecordManager(appContext)
   val sms = SmsManager(appContext)
   val pendant = PendantManager(appContext, scope)
+  private var geofenceManager: GeofenceLocationManager? = null
   private val json = Json { ignoreUnknownKeys = true }
 
   private val externalAudioCaptureActive = MutableStateFlow(false)
@@ -172,6 +179,10 @@ class NodeRuntime(context: Context) {
         updateStatus()
         scope.launch { refreshBrandingFromGateway() }
         scope.launch { refreshWakeWordsFromGateway() }
+        // Initialize geofencing on first connection
+        if (geofenceManager == null) {
+          initGeofencing()
+        }
       },
       onDisconnected = { message ->
         operatorConnected = false
@@ -790,8 +801,178 @@ class NodeRuntime(context: Context) {
       return
     }
 
+
+    // Handle geofence location events from backend
+    if (event == "pendant.location.saved") {
+      handleLocationSaved(payloadJson)
+      return
+    }
+    if (event == "pendant.location.updated") {
+      handleLocationUpdated(payloadJson)
+      return
+    }
+    if (event == "pendant.location.deleted") {
+      handleLocationDeleted(payloadJson)
+      return
+    }
+
     talkMode.handleGatewayEvent(event, payloadJson)
     chat.handleGatewayEvent(event, payloadJson)
+  }
+
+
+  // ── Geofencing wiring ──────────────────────────────────────────────
+
+  /**
+   * Initialize geofencing: retrieve the LocationManager created in NodeApp,
+   * set up the GeofenceCallback to bridge events to the gateway via WebSocket,
+   * and re-register any persisted geofences.
+   *
+   * Must be called after the runtime is created (e.g. from the first connect).
+   */
+  fun initGeofencing() {
+    val app = appContext as? NodeApp ?: return
+    val manager = app.geofenceLocationManager
+    geofenceManager = manager
+
+    // Wire geofence events to WebSocket bridge
+    manager.setCallback(object : GeofenceCallback {
+      override fun onGeofenceEvent(event: GeofenceEvent) {
+        scope.launch {
+          sendGeofenceEvent(event)
+        }
+      }
+    })
+
+    // Re-register persisted geofences so the manager's in-memory map is populated
+    val persisted = LocationPersistence.loadLocations(appContext)
+    if (persisted.isNotEmpty()) {
+      manager.reregisterGeofences(persisted)
+    }
+  }
+
+  /**
+   * Send a geofence event to the gateway over the operator WebSocket session.
+   */
+  private suspend fun sendGeofenceEvent(event: GeofenceEvent) {
+    if (!operatorConnected) return
+    // Send separate event names matching the TypeScript hook listeners:
+    // pendant.geofence.enter or pendant.geofence.exit
+    val eventName = when (event.eventType) {
+      GeofenceEventType.ENTER -> "pendant.geofence.enter"
+      GeofenceEventType.EXIT -> "pendant.geofence.exit"
+    }
+    try {
+      operatorSession.sendNodeEvent(
+        event = eventName,
+        payloadJson = buildJsonObject {
+          put("locationId", JsonPrimitive(event.locationId))
+          put("locationName", JsonPrimitive(event.locationName))
+          put("timestamp", JsonPrimitive(event.timestamp))
+        }.toString()
+      )
+    } catch (e: Throwable) {
+      Log.w("NodeRuntime", "Failed to send geofence event: ${e.message}")
+    }
+  }
+
+  /**
+   * Handle pendant.location.saved event from the backend.
+   * Registers a new geofence and persists the location for boot recovery.
+   */
+  private fun handleLocationSaved(payloadJson: String?) {
+    if (payloadJson.isNullOrBlank()) return
+    val manager = geofenceManager ?: return
+    try {
+      val payload = json.parseToJsonElement(payloadJson).asObjectOrNull() ?: return
+      val id = payload["id"].asStringOrNull() ?: return
+      val name = payload["name"].asStringOrNull() ?: "Unnamed"
+      val latitude = payload["latitude"].asStringOrNull()?.toDoubleOrNull() ?: return
+      val longitude = payload["longitude"].asStringOrNull()?.toDoubleOrNull() ?: return
+      val radiusMeters = payload["radiusMeters"].asStringOrNull()?.toFloatOrNull()
+        ?: GeofenceLocationManager.DEFAULT_RADIUS_METERS
+      val address = payload["address"].asStringOrNull()
+      val starred = payload["starred"].asStringOrNull()?.toBooleanStrictOrNull() ?: false
+
+      val location = SavedLocation(
+        id = id,
+        name = name,
+        latitude = latitude,
+        longitude = longitude,
+        radiusMeters = radiusMeters,
+        address = address,
+        starred = starred
+      )
+
+      scope.launch {
+        manager.registerGeofence(location)
+        LocationPersistence.addLocation(appContext, location)
+        Log.i("NodeRuntime", "Registered geofence for saved location: $name ($id)")
+      }
+    } catch (e: Throwable) {
+      Log.w("NodeRuntime", "Failed to handle pendant.location.saved: ${e.message}")
+    }
+  }
+
+  /**
+   * Handle pendant.location.updated event from the backend.
+   * Re-registers the geofence with updated parameters and updates persistence.
+   */
+  private fun handleLocationUpdated(payloadJson: String?) {
+    if (payloadJson.isNullOrBlank()) return
+    val manager = geofenceManager ?: return
+    try {
+      val payload = json.parseToJsonElement(payloadJson).asObjectOrNull() ?: return
+      val id = payload["id"].asStringOrNull() ?: return
+      val name = payload["name"].asStringOrNull() ?: "Unnamed"
+      val latitude = payload["latitude"].asStringOrNull()?.toDoubleOrNull() ?: return
+      val longitude = payload["longitude"].asStringOrNull()?.toDoubleOrNull() ?: return
+      val radiusMeters = payload["radiusMeters"].asStringOrNull()?.toFloatOrNull()
+        ?: GeofenceLocationManager.DEFAULT_RADIUS_METERS
+      val address = payload["address"].asStringOrNull()
+      val starred = payload["starred"].asStringOrNull()?.toBooleanStrictOrNull() ?: false
+
+      val location = SavedLocation(
+        id = id,
+        name = name,
+        latitude = latitude,
+        longitude = longitude,
+        radiusMeters = radiusMeters,
+        address = address,
+        starred = starred
+      )
+
+      scope.launch {
+        // Unregister old geofence, then re-register with updated params
+        manager.unregisterGeofence(id)
+        manager.registerGeofence(location)
+        LocationPersistence.addLocation(appContext, location)
+        Log.i("NodeRuntime", "Updated geofence for location: $name ($id)")
+      }
+    } catch (e: Throwable) {
+      Log.w("NodeRuntime", "Failed to handle pendant.location.updated: ${e.message}")
+    }
+  }
+
+  /**
+   * Handle pendant.location.deleted event from the backend.
+   * Unregisters the geofence and removes the location from persistence.
+   */
+  private fun handleLocationDeleted(payloadJson: String?) {
+    if (payloadJson.isNullOrBlank()) return
+    val manager = geofenceManager ?: return
+    try {
+      val payload = json.parseToJsonElement(payloadJson).asObjectOrNull() ?: return
+      val id = payload["id"].asStringOrNull() ?: return
+
+      scope.launch {
+        manager.unregisterGeofence(id)
+        LocationPersistence.removeLocation(appContext, id)
+        Log.i("NodeRuntime", "Unregistered geofence for deleted location: $id")
+      }
+    } catch (e: Throwable) {
+      Log.w("NodeRuntime", "Failed to handle pendant.location.deleted: ${e.message}")
+    }
   }
 
   private fun applyWakeWordsFromGateway(words: List<String>) {

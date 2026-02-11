@@ -1,49 +1,379 @@
 {
+  "$schema": "https://openclaw.ai/schemas/plugin.json",
   "id": "pendant",
+  "name": "BLE Pendant",
+  "version": "1.1.0",
   "kind": "integration",
+  "description": "Audio streaming, transcription, intent detection, task management, location-based reminders, and long-term memory from BLE pendant devices",
+  "author": "OpenClaw",
+  "license": "MIT",
+  "keywords": [
+    "pendant",
+    "ble",
+    "bluetooth",
+    "audio",
+    "transcription",
+    "stt",
+    "speech-to-text",
+    "voice",
+    "diarization",
+    "tasks",
+    "reminders",
+    "location",
+    "geofence",
+    "memory"
+  ],
+  "capabilities": [
+    "audio-input",
+    "speaker-diarization",
+    "voice-fingerprint",
+    "intent-detection",
+    "task-creation",
+    "location-reminders",
+    "memory-autosave"
+  ],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
       "sttProvider": {
         "type": "string",
-        "description": "Speech-to-text provider for pendant audio",
+        "description": "Speech-to-text provider for pendant audio. Options: 'deepgram' (cloud), 'whisper' (self-hosted), 'gateway' (built-in).",
         "enum": ["deepgram", "whisper", "gateway"],
         "default": "gateway"
       },
       "deepgramApiKey": {
         "type": "string",
-        "description": "Deepgram API key (if using Deepgram STT)"
+        "description": "Deepgram API key. Required if sttProvider is 'deepgram'. Get one at https://console.deepgram.com"
       },
       "whisperEndpoint": {
         "type": "string",
-        "description": "Whisper API endpoint (if using Whisper STT)"
+        "description": "Whisper API endpoint URL. Required if sttProvider is 'whisper'. Example: http://localhost:9000/v1/audio/transcriptions"
       },
       "autoTranscribe": {
         "type": "boolean",
-        "description": "Automatically transcribe incoming pendant audio",
+        "description": "Automatically transcribe incoming pendant audio. Set to false to manually trigger transcription.",
         "default": true
       },
       "bufferDurationMs": {
         "type": "number",
-        "description": "Audio buffer duration before sending for transcription",
-        "default": 1000
+        "description": "Audio buffer duration in milliseconds before sending for transcription. Lower values = faster response, higher values = better accuracy.",
+        "default": 1000,
+        "minimum": 100,
+        "maximum": 10000
       },
       "enableSpeakerDiarization": {
         "type": "boolean",
-        "description": "Enable speaker diarization and voice fingerprinting",
+        "description": "Enable speaker diarization to identify and track different speakers by their voice.",
         "default": true
       },
       "speakerMatchThreshold": {
         "type": "number",
-        "description": "Confidence threshold for matching voices to known profiles (0-1)",
-        "default": 0.75
+        "description": "Confidence threshold (0-1) for matching voices to known profiles. Higher = stricter matching.",
+        "default": 0.75,
+        "minimum": 0,
+        "maximum": 1
       },
       "autoCreateVoiceProfiles": {
         "type": "boolean",
-        "description": "Automatically create voice profiles for unrecognized speakers",
+        "description": "Automatically create voice profiles for unrecognized speakers.",
         "default": true
+      },
+      "enableIntentDetection": {
+        "type": "boolean",
+        "description": "Enable automatic intent detection from transcripts (task creation, memory save, etc.).",
+        "default": true
+      },
+      "intentConfidenceThreshold": {
+        "type": "number",
+        "description": "Minimum confidence (0-1) required to act on a detected intent. Lower = more aggressive, higher = more conservative.",
+        "default": 0.7,
+        "minimum": 0,
+        "maximum": 1
+      },
+      "autoSaveToMemory": {
+        "type": "boolean",
+        "description": "Automatically save pendant transcripts to long-term memory files for later search.",
+        "default": true
+      },
+      "memoryFlushIntervalMs": {
+        "type": "number",
+        "description": "How often to flush transcript buffer to memory files (milliseconds).",
+        "default": 300000,
+        "minimum": 60000,
+        "maximum": 3600000
+      },
+      "memoryFlushMinEntries": {
+        "type": "number",
+        "description": "Minimum number of transcript entries before flushing to memory.",
+        "default": 5,
+        "minimum": 1,
+        "maximum": 100
+      },
+      "locationDefaultRadiusMeters": {
+        "type": "number",
+        "description": "Default geofence radius in meters for saved locations.",
+        "default": 100,
+        "minimum": 10,
+        "maximum": 10000
+      },
+      "locationReminderMode": {
+        "type": "string",
+        "enum": ["notification", "ai_message", "both"],
+        "description": "How to alert when a location-based reminder triggers. 'notification' = system notification, 'ai_message' = send to AI, 'both' = both methods.",
+        "default": "both"
+      },
+      "enableSoftwareVAD": {
+        "type": "boolean",
+        "description": "Enable software Voice Activity Detection to skip silence. This is redundant with the pendant's hardware VAD but provides a safety net to avoid wasting STT API calls on silence.",
+        "default": true
+      },
+      "vadEnergyThreshold": {
+        "type": "number",
+        "description": "RMS energy threshold for speech detection (0-1). Audio frames below this level are considered silence. Lower = more sensitive, higher = stricter.",
+        "default": 0.01,
+        "minimum": 0.001,
+        "maximum": 0.5
+      },
+      "vadSpeechRatio": {
+        "type": "number",
+        "description": "Minimum ratio of audio frames that must exceed the energy threshold to consider the buffer as containing speech (0-1). Lower = more permissive.",
+        "default": 0.1,
+        "minimum": 0.01,
+        "maximum": 1
       }
     }
+  },
+  "tools": [
+    {
+      "name": "voice_profile_list",
+      "description": "List all known voice profiles (people whose voices have been fingerprinted)",
+      "category": "pendant"
+    },
+    {
+      "name": "voice_profile_identify",
+      "description": "Assign a name/identity to a voice profile (link a voice to a person)",
+      "category": "pendant"
+    },
+    {
+      "name": "pendant_channel_status",
+      "description": "Get status of the pendant audio channel including speaker history",
+      "category": "pendant"
+    },
+    {
+      "name": "pendant_control",
+      "description": "Control BLE pendant device connected to Android node (scan, connect, disconnect, status)",
+      "category": "pendant"
+    },
+    {
+      "name": "pendant_task_create",
+      "description": "Create a task or reminder from pendant voice input. Supports time-based and location-based triggers.",
+      "category": "tasks"
+    },
+    {
+      "name": "pendant_task_list",
+      "description": "List pending tasks and reminders",
+      "category": "tasks"
+    },
+    {
+      "name": "pendant_task_complete",
+      "description": "Mark a task as completed. Can identify task by ID, position, or text match.",
+      "category": "tasks"
+    },
+    {
+      "name": "pendant_task_delete",
+      "description": "Delete a task. Can identify by ID, position, or text match.",
+      "category": "tasks"
+    },
+    {
+      "name": "pendant_task_clear_completed",
+      "description": "Remove all completed tasks from the list",
+      "category": "tasks"
+    },
+    {
+      "name": "location_save",
+      "description": "Save the current location with a name for geofencing",
+      "category": "locations"
+    },
+    {
+      "name": "location_list",
+      "description": "List all saved locations",
+      "category": "locations"
+    },
+    {
+      "name": "location_update",
+      "description": "Update a saved location's name, radius, or starred status",
+      "category": "locations"
+    },
+    {
+      "name": "location_delete",
+      "description": "Delete a saved location",
+      "category": "locations"
+    },
+    {
+      "name": "location_group_create",
+      "description": "Create a new location group (e.g., Grocery Stores, Offices)",
+      "category": "locations"
+    },
+    {
+      "name": "location_group_add",
+      "description": "Add a location to a group",
+      "category": "locations"
+    },
+    {
+      "name": "location_group_remove",
+      "description": "Remove a location from a group",
+      "category": "locations"
+    },
+    {
+      "name": "location_group_list",
+      "description": "List all location groups with their locations",
+      "category": "locations"
+    },
+    {
+      "name": "person_profile_create",
+      "description": "Create a profile for a person to track their locations and info",
+      "category": "people"
+    },
+    {
+      "name": "person_profile_update",
+      "description": "Update a person's profile information",
+      "category": "people"
+    },
+    {
+      "name": "person_profile_list",
+      "description": "List all people profiles",
+      "category": "people"
+    },
+    {
+      "name": "person_profile_get",
+      "description": "Get detailed information about a specific person",
+      "category": "people"
+    },
+    {
+      "name": "person_location_add",
+      "description": "Add a location tag to a person (e.g., \"John's home is at...\")",
+      "category": "people"
+    },
+    {
+      "name": "person_location_remove",
+      "description": "Remove a location tag from a person",
+      "category": "people"
+    },
+    {
+      "name": "person_location_list",
+      "description": "List all saved locations for a person",
+      "category": "people"
+    },
+    {
+      "name": "person_voice_link",
+      "description": "Link a voice profile to a person (for speaker identification)",
+      "category": "people"
+    },
+    {
+      "name": "pendant_memory_status",
+      "description": "Get status and statistics of the pendant memory auto-save system",
+      "category": "memory"
+    },
+    {
+      "name": "pendant_memory_flush",
+      "description": "Manually flush all pending transcripts to memory files",
+      "category": "memory"
+    }
+  ],
+  "events": {
+    "emits": [
+      {
+        "name": "pendant.transcript",
+        "description": "Emitted when audio is transcribed. Contains transcript, speaker info, and detected intent."
+      },
+      {
+        "name": "pendant.intent",
+        "description": "Emitted when an intent is detected from a transcript."
+      },
+      {
+        "name": "pendant.task.created",
+        "description": "Emitted when a task is created from voice input."
+      },
+      {
+        "name": "pendant.task.triggered",
+        "description": "Emitted when a location-based task is triggered."
+      },
+      {
+        "name": "pendant.task.list",
+        "description": "Emitted with task list when user asks to see tasks."
+      },
+      {
+        "name": "pendant.location.saved",
+        "description": "Emitted when a location is saved. Android should register geofence."
+      },
+      {
+        "name": "pendant.location.updated",
+        "description": "Emitted when a location is updated. Android should update geofence."
+      },
+      {
+        "name": "pendant.location.deleted",
+        "description": "Emitted when a location is deleted. Android should remove geofence."
+      },
+      {
+        "name": "pendant.person.location.added",
+        "description": "Emitted when a location is added to a person profile."
+      },
+      {
+        "name": "channel.message",
+        "description": "Emitted for AI to process transcripts as channel messages."
+      }
+    ],
+    "listens": [
+      {
+        "name": "pendant.audio",
+        "description": "Receives PCM audio data from pendant via Android node."
+      },
+      {
+        "name": "pendant.geofence.enter",
+        "description": "Receives geofence enter events from Android location service."
+      },
+      {
+        "name": "pendant.geofence.exit",
+        "description": "Receives geofence exit events from Android location service."
+      }
+    ]
+  },
+  "storage": {
+    "keys": [
+      {
+        "key": "pendant:voice_profiles",
+        "description": "Voice profiles from speaker diarization"
+      },
+      {
+        "key": "pendant:tasks",
+        "description": "Tasks and reminders created from voice input"
+      },
+      {
+        "key": "pendant:locations",
+        "description": "Saved locations for geofencing"
+      },
+      {
+        "key": "pendant:location_groups",
+        "description": "Location groups for organizing saved locations"
+      },
+      {
+        "key": "pendant:people_profiles",
+        "description": "People profiles with location tags"
+      }
+    ]
+  },
+  "android": {
+    "permissions": [
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_BACKGROUND_LOCATION",
+      "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.BLUETOOTH",
+      "android.permission.BLUETOOTH_ADMIN",
+      "android.permission.BLUETOOTH_SCAN",
+      "android.permission.BLUETOOTH_CONNECT"
+    ],
+    "dependencies": ["com.google.android.gms:play-services-location:21.3.0"]
   }
 }

@@ -95,7 +95,7 @@ export class SpeakerDiarizer {
   async processAudio(
     pcmData: Buffer,
     sampleRate: number,
-    context?: { sessionKey: string; conversationContext?: string }
+    context?: { sessionKey: string; conversationContext?: string },
   ): Promise<SpeakerSegment[]> {
     // Step 1: Voice Activity Detection (VAD) - find speech regions
     const speechRegions = await this.detectSpeech(pcmData, sampleRate);
@@ -130,7 +130,7 @@ export class SpeakerDiarizer {
    */
   private async detectSpeech(
     pcmData: Buffer,
-    sampleRate: number
+    sampleRate: number,
   ): Promise<Array<{ startMs: number; endMs: number }>> {
     // Placeholder - would use a VAD model like Silero VAD
     // For now, treat entire audio as speech
@@ -144,7 +144,7 @@ export class SpeakerDiarizer {
   private async segmentSpeakers(
     pcmData: Buffer,
     sampleRate: number,
-    speechRegions: Array<{ startMs: number; endMs: number }>
+    speechRegions: Array<{ startMs: number; endMs: number }>,
   ): Promise<SpeakerSegment[]> {
     // Placeholder - would use speaker change detection
     // For now, return one segment per speech region
@@ -159,11 +159,7 @@ export class SpeakerDiarizer {
   /**
    * Extract audio segment from buffer.
    */
-  private extractSegment(
-    pcmData: Buffer,
-    sampleRate: number,
-    segment: SpeakerSegment
-  ): Buffer {
+  private extractSegment(pcmData: Buffer, sampleRate: number, segment: SpeakerSegment): Buffer {
     const bytesPerMs = (sampleRate * 2) / 1000; // 16-bit PCM
     const startByte = Math.floor(segment.startMs * bytesPerMs);
     const endByte = Math.floor(segment.endMs * bytesPerMs);
@@ -173,10 +169,7 @@ export class SpeakerDiarizer {
   /**
    * Generate voice embedding for audio segment.
    */
-  private async generateEmbedding(
-    pcmData: Buffer,
-    sampleRate: number
-  ): Promise<VoiceEmbedding> {
+  private async generateEmbedding(pcmData: Buffer, sampleRate: number): Promise<VoiceEmbedding> {
     // Placeholder - would use a speaker embedding model
     // Options:
     // - Pyannote/speechbrain embeddings via API
@@ -196,12 +189,12 @@ export class SpeakerDiarizer {
    */
   private async matchSpeaker(
     embedding: VoiceEmbedding,
-    context?: { sessionKey: string; conversationContext?: string }
+    context?: { sessionKey: string; conversationContext?: string },
   ): Promise<SpeakerMatch> {
     let bestMatch: VoiceProfile | null = null;
     let bestScore = 0;
 
-    for (const profile of this.profiles.values()) {
+    for (const profile of Array.from(this.profiles.values())) {
       for (const profileEmbedding of profile.embeddings) {
         const score = this.cosineSimilarity(embedding, profileEmbedding);
         if (score > bestScore && score >= this.config.matchThreshold) {
@@ -280,7 +273,7 @@ export class SpeakerDiarizer {
   async createProfile(
     embedding: VoiceEmbedding,
     suggestedName?: string,
-    context?: { sessionKey: string; conversationContext?: string }
+    context?: { sessionKey: string; conversationContext?: string },
   ): Promise<VoiceProfile> {
     const id = `voice_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const now = new Date().toISOString();
@@ -349,7 +342,7 @@ export class SpeakerDiarizer {
     for (const profile of profiles) {
       // Convert embedding arrays back to Float32Array
       profile.embeddings = profile.embeddings.map(
-        (e) => new Float32Array(e as unknown as ArrayLike<number>)
+        (e) => new Float32Array(e as unknown as ArrayLike<number>),
       );
       this.profiles.set(profile.id, profile);
     }
@@ -371,7 +364,7 @@ export class SpeakerDiarizer {
  */
 export function formatDiarizedTranscript(
   segments: SpeakerSegment[],
-  transcripts: Map<string, string>
+  transcripts: Map<string, string>,
 ): string {
   const lines: string[] = [];
 

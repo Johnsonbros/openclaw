@@ -3,6 +3,11 @@
  *
  * Manages saved locations and location groups for geofencing.
  * Locations can be starred, organized into groups, and have configurable radii.
+ *
+ * TODO(P-M11): The Android-side LocationPermissions class
+ * (apps/android/.../location/LocationPermissions.kt) appears to be dead code —
+ * permission checks are handled in LocationManager.hasLocationPermissions().
+ * Consider deleting LocationPermissions.kt if confirmed unused.
  */
 
 import type { PendantStorage } from "./storage.js";

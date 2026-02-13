@@ -19,7 +19,7 @@ import * as path from "node:path";
 /**
  * A single transcript entry in the buffer.
  */
-export interface TranscriptEntry {
+export interface MemoryTranscriptEntry {
   /** ISO timestamp of when the transcript was captured */
   timestamp: string;
   /** Speaker ID from voice profile (if available) */
@@ -43,7 +43,7 @@ export interface TranscriptEntry {
  */
 export interface TranscriptBuffer {
   /** Buffered transcript entries */
-  entries: TranscriptEntry[];
+  entries: MemoryTranscriptEntry[];
   /** Timestamp of last flush to memory */
   lastFlush: number;
   /** Session key this buffer belongs to */
@@ -202,7 +202,7 @@ export class MemoryHookManager {
    * @param sessionKey - The session key for this entry
    * @param entry - The transcript entry to add
    */
-  async addEntry(sessionKey: string, entry: TranscriptEntry): Promise<void> {
+  async addEntry(sessionKey: string, entry: MemoryTranscriptEntry): Promise<void> {
     if (!this.config.enabled) {
       return;
     }
@@ -439,7 +439,7 @@ export class MemoryHookManager {
    * @param sessionKey - The session key
    * @returns Buffer entries or empty array
    */
-  getBufferEntries(sessionKey: string): TranscriptEntry[] {
+  getBufferEntries(sessionKey: string): MemoryTranscriptEntry[] {
     return this.buffers.get(sessionKey)?.entries || [];
   }
 
@@ -467,6 +467,7 @@ export class MemoryHookManager {
 // Tool Definitions
 // ============================================================================
 
+// TODO: Remove dead code - createMemoryTools is unused, index.ts defines memory tools inline
 /**
  * Create memory hook tools for the pendant plugin.
  *
@@ -536,6 +537,7 @@ export function createMemoryTools(memoryHook: MemoryHookManager) {
 // Integration Helper
 // ============================================================================
 
+// TODO: Remove dead code - createTranscriptHandler is unused
 /**
  * Create a transcript handler that integrates with the memory hook.
  *

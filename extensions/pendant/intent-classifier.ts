@@ -41,7 +41,7 @@ export interface LocationTrigger {
   locationName?: string; // "work", "home", "gym"
   groupName?: string; // "grocery stores"
   personName?: string; // For "near John's house"
-  triggerOn: "enter" | "exit";
+  triggerOn: "enter" | "exit" | "both";
 }
 
 /**

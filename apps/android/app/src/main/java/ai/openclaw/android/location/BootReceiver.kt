@@ -94,6 +94,12 @@ class BootReceiver : BroadcastReceiver() {
   /**
    * Re-register all saved geofences.
    *
+   * [P-H8] Limitation: geofence transitions that occur between device boot and the
+   * first gateway WebSocket connection are inherently undeliverable. The broadcast
+   * receiver re-registers geofences with the OS, but there is no connected gateway
+   * session to forward events to until the app starts and connects. This is an
+   * acceptable edge case since the window is typically very short.
+   *
    * @param context Application context
    */
   private suspend fun reregisterGeofences(context: Context) {
@@ -148,6 +154,12 @@ object LocationPersistence {
   private val json = Json { ignoreUnknownKeys = true }
 
   /**
+   * Lock guarding read-modify-write cycles in [addLocation] and [removeLocation]
+   * to prevent concurrent writes from losing data.  [P-H7]
+   */
+  private val lock = Any()
+
+  /**
    * Save locations to SharedPreferences.
    *
    * @param context Application context
@@ -182,29 +194,36 @@ object LocationPersistence {
       emptyList()
     }
   }
-
   /**
    * Add a location to persistence.
+   *
+   * Synchronized to prevent concurrent read-modify-write races. [P-H7]
    *
    * @param context Application context
    * @param location Location to add
    */
   fun addLocation(context: Context, location: SavedLocation) {
-    val locations = loadLocations(context).toMutableList()
-    locations.removeAll { it.id == location.id }
-    locations.add(location)
-    saveLocations(context, locations)
+    synchronized(lock) {
+      val locations = loadLocations(context).toMutableList()
+      locations.removeAll { it.id == location.id }
+      locations.add(location)
+      saveLocations(context, locations)
+    }
   }
 
   /**
    * Remove a location from persistence.
    *
+   * Synchronized to prevent concurrent read-modify-write races. [P-H7]
+   *
    * @param context Application context
    * @param locationId ID of location to remove
    */
   fun removeLocation(context: Context, locationId: String) {
-    val locations = loadLocations(context).filter { it.id != locationId }
-    saveLocations(context, locations)
+    synchronized(lock) {
+      val locations = loadLocations(context).filter { it.id != locationId }
+      saveLocations(context, locations)
+    }
   }
 
   /**

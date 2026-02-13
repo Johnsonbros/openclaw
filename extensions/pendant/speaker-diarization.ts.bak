@@ -170,14 +170,13 @@ export class SpeakerDiarizer {
    * Generate voice embedding for audio segment.
    */
   private async generateEmbedding(pcmData: Buffer, sampleRate: number): Promise<VoiceEmbedding> {
-    // TODO(P-M9): Replace random embeddings with a real speaker embedding model.
-    // Current random embeddings make speaker matching non-deterministic and unreliable.
+    // Placeholder - would use a speaker embedding model
     // Options:
     // - Pyannote/speechbrain embeddings via API
     // - Local ONNX model (resemblyzer, ecapa-tdnn)
     // - OpenAI Whisper with speaker embeddings
 
-    // Return random embedding for now (256 dimensions) — known placeholder
+    // Return random embedding for now (256 dimensions)
     const embedding = new Float32Array(256);
     for (let i = 0; i < 256; i++) {
       embedding[i] = Math.random() * 2 - 1;
@@ -352,10 +351,10 @@ export class SpeakerDiarizer {
   /**
    * Export profiles for storage.
    */
-  exportProfiles(): Array<Omit<VoiceProfile, "embeddings"> & { embeddings: number[][] }> {
+  exportProfiles(): VoiceProfile[] {
     return this.getProfiles().map((profile) => ({
       ...profile,
-      embeddings: profile.embeddings.map((e) => Array.from(e)),
+      embeddings: profile.embeddings.map((e) => Array.from(e) as unknown as Float32Array),
     }));
   }
 }

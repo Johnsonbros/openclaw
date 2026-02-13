@@ -34,12 +34,16 @@
   ],
   "configSchema": {
     "type": "object",
-    "additionalProperties": false,
+    "additionalProperties": true,
     "properties": {
       "sttProvider": {
         "type": "string",
         "description": "Speech-to-text provider for pendant audio. Options: 'deepgram' (cloud), 'whisper' (self-hosted), 'gateway' (built-in).",
-        "enum": ["deepgram", "whisper", "gateway"],
+        "enum": [
+          "deepgram",
+          "whisper",
+          "gateway"
+        ],
         "default": "gateway"
       },
       "deepgramApiKey": {
@@ -119,7 +123,11 @@
       },
       "locationReminderMode": {
         "type": "string",
-        "enum": ["notification", "ai_message", "both"],
+        "enum": [
+          "notification",
+          "ai_message",
+          "both"
+        ],
         "description": "How to alert when a location-based reminder triggers. 'notification' = system notification, 'ai_message' = send to AI, 'both' = both methods.",
         "default": "both"
       },
@@ -141,6 +149,18 @@
         "default": 0.1,
         "minimum": 0.01,
         "maximum": 1
+      },
+      "transcriptWindowSize": {
+        "type": "integer",
+        "description": "Number of recent transcript entries to include in the sliding window for LLM-based intent classification.",
+        "default": 10,
+        "minimum": 1,
+        "maximum": 100
+      },
+      "intentUseLLMAlways": {
+        "type": "boolean",
+        "description": "Always use LLM-based intent classification instead of the regex fast-path. More accurate but slower and uses API calls.",
+        "default": false
       }
     }
   },
@@ -336,6 +356,10 @@
       {
         "name": "pendant.geofence.exit",
         "description": "Receives geofence exit events from Android location service."
+      },
+      {
+        "name": "pendant.location.update",
+        "description": "Receives GPS location updates from Android node."
       }
     ]
   },
@@ -374,6 +398,8 @@
       "android.permission.BLUETOOTH_SCAN",
       "android.permission.BLUETOOTH_CONNECT"
     ],
-    "dependencies": ["com.google.android.gms:play-services-location:21.3.0"]
+    "dependencies": [
+      "com.google.android.gms:play-services-location:21.3.0"
+    ]
   }
 }

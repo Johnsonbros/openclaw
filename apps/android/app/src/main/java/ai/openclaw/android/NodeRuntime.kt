@@ -1,6 +1,7 @@
 package ai.openclaw.android
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.util.Log
 import android.content.Context
 import android.content.pm.PackageManager
@@ -42,6 +43,7 @@ import ai.openclaw.android.protocol.OpenClawLocationCommand
 import ai.openclaw.android.protocol.OpenClawSmsCommand
 import ai.openclaw.android.location.GeofenceCallback
 import ai.openclaw.android.location.GeofenceEvent
+import ai.openclaw.android.location.GeofenceEventType
 import ai.openclaw.android.location.LocationPersistence
 import ai.openclaw.android.location.SavedLocation
 import ai.openclaw.android.location.LocationManager as GeofenceLocationManager
@@ -68,6 +70,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import java.util.concurrent.atomic.AtomicLong
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.FusedLocationProviderClient
 
 class NodeRuntime(context: Context) {
   private val appContext = context.applicationContext
@@ -82,6 +86,7 @@ class NodeRuntime(context: Context) {
   val sms = SmsManager(appContext)
   val pendant = PendantManager(appContext, scope)
   private var geofenceManager: GeofenceLocationManager? = null
+  private var fusedLocationClient: FusedLocationProviderClient? = null
   private val json = Json { ignoreUnknownKeys = true }
 
   private val externalAudioCaptureActive = MutableStateFlow(false)
@@ -849,19 +854,36 @@ class NodeRuntime(context: Context) {
     if (persisted.isNotEmpty()) {
       manager.reregisterGeofences(persisted)
     }
+
+    // Initialize fused location client and send initial GPS position [P-H1]
+    fusedLocationClient = LocationServices.getFusedLocationProviderClient(appContext)
+    sendCurrentLocation()
   }
 
   /**
    * Send a geofence event to the gateway over the operator WebSocket session.
    */
+  @SuppressLint("MissingPermission")
   private suspend fun sendGeofenceEvent(event: GeofenceEvent) {
     if (!operatorConnected) return
-    // Send separate event names matching the TypeScript hook listeners:
-    // pendant.geofence.enter or pendant.geofence.exit
+
+    // [P-H1] Send current GPS coordinates before the geofence event
+    sendCurrentLocation()
+
+    // [P-H4] Handle all GeofenceEventType variants including DWELL.
+    // DWELL is treated as a loitering confirmation and mapped to pendant.geofence.enter.
     val eventName = when (event.eventType) {
       GeofenceEventType.ENTER -> "pendant.geofence.enter"
       GeofenceEventType.EXIT -> "pendant.geofence.exit"
+      GeofenceEventType.DWELL -> "pendant.geofence.enter"
     }
+
+    // [P-H2] Look up the full saved location to include additional metadata.
+    // The TS side can resolve groupId and personLocationTag from locationId,
+    // so we pass through what we have and let the backend fill in the rest.
+    val savedLocation = LocationPersistence.loadLocations(appContext)
+      .firstOrNull { it.id == event.locationId }
+
     try {
       operatorSession.sendNodeEvent(
         event = eventName,
@@ -869,10 +891,52 @@ class NodeRuntime(context: Context) {
           put("locationId", JsonPrimitive(event.locationId))
           put("locationName", JsonPrimitive(event.locationName))
           put("timestamp", JsonPrimitive(event.timestamp))
+          // Pass through available location metadata so TS side can resolve
+          // groupId and personLocationTag from the locationId.
+          if (savedLocation != null) {
+            put("latitude", JsonPrimitive(savedLocation.latitude))
+            put("longitude", JsonPrimitive(savedLocation.longitude))
+            put("radiusMeters", JsonPrimitive(savedLocation.radiusMeters.toDouble()))
+            savedLocation.address?.let { put("address", JsonPrimitive(it)) }
+          }
         }.toString()
       )
     } catch (e: Throwable) {
       Log.w("NodeRuntime", "Failed to send geofence event: ${e.message}")
+    }
+  }
+
+  /**
+   * Send the device's current GPS location to the gateway as a
+   * `pendant.location.update` event so the TypeScript plugin's
+   * `currentLocation` field stays populated.  [P-H1]
+   */
+  @SuppressLint("MissingPermission")
+  private fun sendCurrentLocation() {
+    val client = fusedLocationClient ?: return
+    if (!operatorConnected) return
+    if (!hasFineLocationPermission() && !hasCoarseLocationPermission()) return
+    try {
+      client.lastLocation.addOnSuccessListener { location ->
+        if (location == null) return@addOnSuccessListener
+        scope.launch {
+          try {
+            operatorSession.sendNodeEvent(
+              event = "pendant.location.update",
+              payloadJson = buildJsonObject {
+                put("latitude", JsonPrimitive(location.latitude))
+                put("longitude", JsonPrimitive(location.longitude))
+              }.toString()
+            )
+            Log.d("NodeRuntime", "Sent pendant.location.update: " +
+              "${location.latitude}, ${location.longitude}")
+          } catch (e: Throwable) {
+            Log.w("NodeRuntime", "Failed to send pendant.location.update: ${e.message}")
+          }
+        }
+      }
+    } catch (e: Throwable) {
+      Log.w("NodeRuntime", "Failed to get last location: ${e.message}")
     }
   }
 

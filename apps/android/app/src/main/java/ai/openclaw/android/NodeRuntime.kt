@@ -212,6 +212,10 @@ class NodeRuntime(context: Context) {
   private var operatorStatusText: String = "Offline"
   private var nodeStatusText: String = "Offline"
 
+  /** Expose the operator session for pendant audio bridge (null-safe accessor). */
+  val operatorSessionOrNull: GatewaySession?
+    get() = if (operatorConnected) operatorSession else null
+
   private val operatorSession =
     GatewaySession(
       scope = scope,

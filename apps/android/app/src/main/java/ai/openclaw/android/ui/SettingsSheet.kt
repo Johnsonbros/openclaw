@@ -65,6 +65,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import ai.openclaw.android.ble.PendantBleManager
 import ai.openclaw.android.BuildConfig
 import ai.openclaw.android.LocationMode
 import ai.openclaw.android.MainViewModel
@@ -833,6 +834,65 @@ fun SettingsSheet(viewModel: MainViewModel) {
     item {
       TextButton(onClick = { viewModel.openLocalCanvas() }) {
         Text("Use Local Canvas")
+      }
+    }
+
+    item { HorizontalDivider() }
+
+    // Pendant
+    item { Text("BLE Pendant", style = MaterialTheme.typography.titleSmall) }
+    item {
+      val pendantState by viewModel.pendant.connectionState.collectAsState()
+      val connectedPendant by viewModel.pendant.connectedPendant.collectAsState()
+      val discovered by viewModel.pendant.discoveredPendants.collectAsState()
+
+      Column {
+        ListItem(
+          headlineContent = {
+            Text(
+              when (pendantState) {
+                PendantBleManager.ConnectionState.DISCONNECTED -> "No pendant connected"
+                PendantBleManager.ConnectionState.SCANNING -> "Scanning…"
+                PendantBleManager.ConnectionState.CONNECTING -> "Connecting…"
+                PendantBleManager.ConnectionState.CONNECTED ->
+                  connectedPendant?.let { "${it.name} (${it.type})" } ?: "Connected"
+              },
+            )
+          },
+          supportingContent = {
+            Text(
+              when (pendantState) {
+                PendantBleManager.ConnectionState.CONNECTED -> "Audio streaming from pendant"
+                PendantBleManager.ConnectionState.SCANNING -> "Looking for Omi/Limitless pendants…"
+                else -> "Tap Scan to find nearby pendants"
+              },
+            )
+          },
+          trailingContent = {
+            when (pendantState) {
+              PendantBleManager.ConnectionState.CONNECTED ->
+                TextButton(onClick = { viewModel.pendant.disconnect() }) { Text("Disconnect") }
+              PendantBleManager.ConnectionState.SCANNING ->
+                TextButton(onClick = { viewModel.pendant.stopScan() }) { Text("Stop") }
+              else ->
+                TextButton(onClick = { viewModel.pendant.startScan() }) { Text("Scan") }
+            }
+          },
+        )
+        // Show discovered pendants during scan
+        if (pendantState == PendantBleManager.ConnectionState.SCANNING ||
+          (pendantState == PendantBleManager.ConnectionState.DISCONNECTED && discovered.isNotEmpty())
+        ) {
+          for (p in discovered) {
+            ListItem(
+              headlineContent = { Text(p.name) },
+              supportingContent = { Text("${p.type} · ${p.address} · RSSI ${p.rssi}") },
+              trailingContent = {
+                TextButton(onClick = { viewModel.pendant.connect(p.address) }) { Text("Connect") }
+              },
+            )
+          }
+        }
       }
     }
 

@@ -5,13 +5,39 @@ import androidx.lifecycle.AndroidViewModel
 import ai.openclaw.android.gateway.GatewayEndpoint
 import ai.openclaw.android.chat.OutgoingAttachment
 import ai.openclaw.android.node.CameraCaptureManager
+import ai.openclaw.android.ble.PendantAudioBridge
+import ai.openclaw.android.ble.PendantBleManager
 import ai.openclaw.android.node.CanvasController
 import ai.openclaw.android.node.ScreenRecordManager
 import ai.openclaw.android.node.SmsManager
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
   private val runtime: NodeRuntime = (app as NodeApp).runtime
+
+  val pendant = PendantBleManager(app, viewModelScope)
+  private val pendantBridge = PendantAudioBridge(
+    scope = viewModelScope,
+    bleManager = pendant,
+    getSession = { runtime.operatorSessionOrNull },
+    isConnected = { runtime.isConnected.value },
+  )
+
+  init {
+    // Auto-start/stop audio bridge based on pendant connection state
+    pendant.connectionState
+      .onEach { state ->
+        if (state == PendantBleManager.ConnectionState.CONNECTED) {
+          pendantBridge.start()
+        } else {
+          pendantBridge.stop()
+        }
+      }
+      .launchIn(viewModelScope)
+  }
 
   val canvas: CanvasController = runtime.canvas
   val camera: CameraCaptureManager = runtime.camera

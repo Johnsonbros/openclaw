@@ -66,6 +66,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.core.content.ContextCompat
 import ai.openclaw.android.CameraHudKind
+import ai.openclaw.android.ble.PendantBleManager
 import ai.openclaw.android.MainViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,6 +83,7 @@ fun RootScreen(viewModel: MainViewModel) {
   val screenRecordActive by viewModel.screenRecordActive.collectAsState()
   val isForeground by viewModel.isForeground.collectAsState()
   val voiceWakeStatusText by viewModel.voiceWakeStatusText.collectAsState()
+  val pendantState by viewModel.pendant.connectionState.collectAsState()
   val talkEnabled by viewModel.talkEnabled.collectAsState()
   val talkStatusText by viewModel.talkStatusText.collectAsState()
   val talkIsListening by viewModel.talkIsListening.collectAsState()
@@ -205,13 +207,26 @@ fun RootScreen(viewModel: MainViewModel) {
 
   // Keep the overlay buttons above the WebView canvas (AndroidView), otherwise they may not receive touches.
   Popup(alignment = Alignment.TopStart, properties = PopupProperties(focusable = false)) {
-    StatusPill(
-      gateway = gatewayState,
-      voiceEnabled = voiceEnabled,
-      activity = activity,
-      onClick = { sheet = Sheet.Settings },
+    androidx.compose.foundation.layout.Row(
+      verticalAlignment = Alignment.CenterVertically,
       modifier = Modifier.windowInsetsPadding(safeOverlayInsets).padding(start = 12.dp, top = 12.dp),
-    )
+    ) {
+      StatusPill(
+        gateway = gatewayState,
+        voiceEnabled = voiceEnabled,
+        activity = activity,
+        onClick = { sheet = Sheet.Settings },
+      )
+      if (pendantState == PendantBleManager.ConnectionState.CONNECTED) {
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.size(6.dp))
+        Icon(
+          Icons.Default.FiberManualRecord,
+          contentDescription = "Pendant connected",
+          tint = ComposeColor(0xFF4CAF50),
+          modifier = Modifier.size(10.dp),
+        )
+      }
+    }
   }
 
   Popup(alignment = Alignment.TopEnd, properties = PopupProperties(focusable = false)) {

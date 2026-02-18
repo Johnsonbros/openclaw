@@ -49,6 +49,9 @@ class MainActivity : ComponentActivity() {
     viewModel.screenRecorder.attachScreenCaptureRequester(screenCaptureRequester)
     viewModel.screenRecorder.attachPermissionRequester(permissionRequester)
 
+    // Auto-connect to last paired BLE pendant
+    viewModel.pendant.autoConnectLastPaired()
+
     lifecycleScope.launch {
       repeatOnLifecycle(Lifecycle.State.STARTED) {
         viewModel.preventSleep.collect { enabled ->

@@ -160,6 +160,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     runtime.refreshGatewayConnection()
   }
 
+  fun openGatewayA2uiCanvas(): Boolean {
+    return runtime.openGatewayA2uiCanvas()
+  }
+
+  fun openLocalCanvas() {
+    runtime.openLocalCanvas()
+  }
+
   fun connect(endpoint: GatewayEndpoint) {
     runtime.connect(endpoint)
   }

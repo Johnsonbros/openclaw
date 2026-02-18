@@ -535,6 +535,16 @@ class NodeRuntime(context: Context) {
     prefs.setTalkEnabled(value)
   }
 
+  fun openGatewayA2uiCanvas(): Boolean {
+    val url = a2uiHandler.resolveA2uiHostUrl() ?: return false
+    canvas.navigate(url)
+    return true
+  }
+
+  fun openLocalCanvas() {
+    canvas.navigate("")
+  }
+
   fun refreshGatewayConnection() {
     val endpoint = connectedEndpoint ?: return
     val token = prefs.loadGatewayToken()

@@ -34,7 +34,7 @@ class MainActivity : ComponentActivity() {
     applyImmersiveMode()
     requestDiscoveryPermissionsIfNeeded()
     requestNotificationPermissionIfNeeded()
-    NodeForegroundService.start(this)
+    viewModel.startNodeForegroundServiceSafely()
     permissionRequester = PermissionRequester(this)
     screenCaptureRequester = ScreenCaptureRequester(this)
     viewModel.camera.attachLifecycleOwner(this)
@@ -78,6 +78,10 @@ class MainActivity : ComponentActivity() {
 
   override fun onStart() {
     super.onStart()
+    // Retry startup when returning to foreground in case the OS rejected a prior attempt.
+    if (!NodeForegroundService.isRunning) {
+      viewModel.startNodeForegroundServiceSafely()
+    }
     viewModel.setForeground(true)
   }
 
@@ -127,4 +131,5 @@ class MainActivity : ComponentActivity() {
       requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 102)
     }
   }
+
 }

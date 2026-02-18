@@ -296,12 +296,12 @@ class PendantBleManager(
       Log.d(TAG, "Connected: ${_connectedPendant.value}")
     }
 
-    @Deprecated("Deprecated in API 33")
+    @Suppress("DEPRECATION")
+    @Deprecated("Deprecated in API 33", ReplaceWith("onCharacteristicChanged(gatt, characteristic, value)"))
     override fun onCharacteristicChanged(
       gatt: BluetoothGatt,
       characteristic: BluetoothGattCharacteristic,
     ) {
-      @Suppress("DEPRECATION")
       val data = characteristic.value ?: return
       handleNotification(characteristic.uuid, data)
     }

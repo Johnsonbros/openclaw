@@ -19,7 +19,7 @@ cd apps/android
 ./gradlew :app:testDebugUnitTest
 ```
 
-`gradlew` auto-detects the Android SDK at `~/Library/Android/sdk` (macOS default) if `ANDROID_SDK_ROOT` / `ANDROID_HOME` are unset.
+Set `ANDROID_SDK_ROOT` (or `ANDROID_HOME`) or create `apps/android/local.properties` with `sdk.dir=<path-to-android-sdk>` before running Gradle tasks.
 
 ## Connect / Pair
 
@@ -38,7 +38,7 @@ openclaw nodes pending
 openclaw nodes approve <requestId>
 ```
 
-More details: `docs/platforms/android.md`.
+More details: https://docs.openclaw.ai/platforms/android
 
 ## Permissions
 

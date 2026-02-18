@@ -492,7 +492,8 @@ fun SettingsSheet(viewModel: MainViewModel) {
             onValueChange = viewModel::setGatewayToken,
             label = { Text("Gateway Token") },
             modifier = Modifier.fillMaxWidth(),
-            enabled = manualEnabled,
+            // Token applies to both discovered and manual gateways.
+            enabled = true,
             singleLine = true,
           )
           ListItem(

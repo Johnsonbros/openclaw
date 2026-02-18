@@ -35,7 +35,7 @@ object WakeWords {
   }
 
   fun parseCommaSeparated(input: String): List<String> {
-    return input.split(',', '\n', ';').map { it.trim() }.filter { it.isNotEmpty() }
+    return input.split(',').map { it.trim() }.filter { it.isNotEmpty() }
   }
 
   fun parseIfChanged(input: String, current: List<String>): List<String>? {

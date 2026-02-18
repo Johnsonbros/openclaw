@@ -6,9 +6,9 @@ import org.junit.Test
 
 class WakeWordsTest {
   @Test
-  fun parseCommaSeparatedSupportsCommaSemicolonAndNewline() {
+  fun parseCommaSeparatedSplitsOnlyOnCommas() {
     assertEquals(
-      listOf("openclaw", "claude", "omi", "friend"),
+      listOf("openclaw", "claude; omi\nfriend"),
       WakeWords.parseCommaSeparated(" openclaw, claude; omi\nfriend "),
     )
   }

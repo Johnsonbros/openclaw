@@ -1,17 +1,25 @@
 package ai.openclaw.android
 
 import android.app.Application
+import android.app.ForegroundServiceStartNotAllowedException
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import ai.openclaw.android.gateway.GatewayEndpoint
 import ai.openclaw.android.chat.OutgoingAttachment
 import ai.openclaw.android.node.CameraCaptureManager
 import ai.openclaw.android.node.CanvasController
 import ai.openclaw.android.node.ScreenRecordManager
 import ai.openclaw.android.node.SmsManager
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
   private val runtime: NodeRuntime = (app as NodeApp).runtime
+  private var foregroundServiceRetryCount = 0
+  private var foregroundServiceRetryJob: Job? = null
 
   val canvas: CanvasController = runtime.canvas
   val camera: CameraCaptureManager = runtime.camera
@@ -68,6 +76,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setForeground(value: Boolean) {
     runtime.setForeground(value)
+  }
+
+  fun startNodeForegroundServiceSafely() {
+    try {
+      NodeForegroundService.start(getApplication())
+      foregroundServiceRetryCount = 0
+      foregroundServiceRetryJob?.cancel()
+      foregroundServiceRetryJob = null
+    } catch (e: ForegroundServiceStartNotAllowedException) {
+      Log.w(TAG, "Foreground service start blocked by OS policy", e)
+      scheduleForegroundServiceRetry()
+    } catch (e: IllegalStateException) {
+      Log.w(TAG, "Foreground service start failed due to app state", e)
+      scheduleForegroundServiceRetry()
+    } catch (e: RuntimeException) {
+      Log.e(TAG, "Foreground service start failed unexpectedly", e)
+    }
   }
 
   fun setDisplayName(value: String) {
@@ -184,5 +209,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun sendChat(message: String, thinking: String, attachments: List<OutgoingAttachment>) {
     runtime.sendChat(message = message, thinking = thinking, attachments = attachments)
+  }
+
+  private fun scheduleForegroundServiceRetry() {
+    if (foregroundServiceRetryCount >= MAX_FOREGROUND_SERVICE_RETRIES) return
+    if (foregroundServiceRetryJob?.isActive == true) return
+    foregroundServiceRetryCount += 1
+    foregroundServiceRetryJob =
+      viewModelScope.launch {
+        delay(FOREGROUND_SERVICE_RETRY_DELAY_MS)
+        startNodeForegroundServiceSafely()
+      }
+  }
+
+  companion object {
+    private const val TAG = "MainViewModel"
+    private const val MAX_FOREGROUND_SERVICE_RETRIES = 3
+    private const val FOREGROUND_SERVICE_RETRY_DELAY_MS = 1_000L
   }
 }

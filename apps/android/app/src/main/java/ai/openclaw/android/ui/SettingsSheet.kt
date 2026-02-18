@@ -10,11 +10,11 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -33,6 +34,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -54,8 +57,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -64,6 +69,7 @@ import ai.openclaw.android.BuildConfig
 import ai.openclaw.android.LocationMode
 import ai.openclaw.android.MainViewModel
 import ai.openclaw.android.NodeForegroundService
+import ai.openclaw.android.R
 import ai.openclaw.android.VoiceWakeMode
 import ai.openclaw.android.WakeWords
 
@@ -114,6 +120,9 @@ fun SettingsSheet(viewModel: MainViewModel) {
         versionName
       }
     }
+  val pairingGuides = remember { omiPairingGuides }
+  var selectedPairingGuide by remember { mutableStateOf<OmiPairingGuide?>(null) }
+  var pairingGuideFeedback by remember { mutableStateOf<String?>(null) }
 
   if (pendingTrust != null) {
     val prompt = pendingTrust!!
@@ -140,12 +149,58 @@ fun SettingsSheet(viewModel: MainViewModel) {
     )
   }
 
+  if (selectedPairingGuide != null) {
+    val guide = selectedPairingGuide!!
+    AlertDialog(
+      onDismissRequest = { selectedPairingGuide = null },
+      title = { Text(guide.title) },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          guide.steps.forEachIndexed { index, step ->
+            Text("${index + 1}. $step")
+          }
+          Text(
+            guide.footerTip,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+      },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            val preset = WakeWords.presetById(guide.wakePresetId)
+            if (preset != null) {
+              val merged = WakeWords.mergePresets(current = wakeWords, presets = listOf(preset))
+              setWakeWordsText(merged.joinToString(", "))
+              viewModel.setWakeWords(merged)
+              pairingGuideFeedback = "Applied wake words for ${guide.title}."
+            }
+            selectedPairingGuide = null
+          },
+        ) {
+          Text(if (guide.wakePresetId != null) "Apply wake words" else "Done")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { selectedPairingGuide = null }) {
+          Text("Close")
+        }
+      },
+    )
+  }
+
   LaunchedEffect(wakeWords) { setWakeWordsText(wakeWords.joinToString(", ")) }
   val commitWakeWords = {
     val parsed = WakeWords.parseIfChanged(wakeWordsText, wakeWords)
     if (parsed != null) {
       viewModel.setWakeWords(parsed)
     }
+  }
+  val applyOmiPreset: (WakeWords.Preset) -> Unit = { preset ->
+    val merged = WakeWords.mergePresets(current = wakeWords, presets = listOf(preset))
+    setWakeWordsText(merged.joinToString(", "))
+    viewModel.setWakeWords(merged)
   }
 
   val permissionLauncher =
@@ -464,6 +519,44 @@ fun SettingsSheet(viewModel: MainViewModel) {
 
     item { HorizontalDivider() }
 
+    // Pairing (Omi-style quick guide)
+    item { Text("Pairing Guide", style = MaterialTheme.typography.titleSmall) }
+    item {
+      Text(
+        "Tap a device to view pairing steps with an Omi-like flow.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+    }
+    item {
+      pairingGuideFeedback?.let { feedback ->
+        Text(feedback, color = MaterialTheme.colorScheme.primary)
+      }
+    }
+    items(items = pairingGuides, key = { it.id }) { guide ->
+      Card(
+        modifier = Modifier.clickable { selectedPairingGuide = guide },
+        colors =
+          CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+          ),
+      ) {
+        ListItem(
+          headlineContent = { Text(guide.title) },
+          supportingContent = { Text(guide.summary) },
+          leadingContent = {
+            Image(
+              painter = painterResource(id = guide.imageRes),
+              contentDescription = guide.title,
+              modifier = Modifier.size(52.dp),
+              contentScale = ContentScale.Fit,
+            )
+          },
+        )
+      }
+    }
+
+    item { HorizontalDivider() }
+
     // Voice
     item { Text("Voice", style = MaterialTheme.typography.titleSmall) }
     item {
@@ -551,6 +644,20 @@ fun SettingsSheet(viewModel: MainViewModel) {
             },
           ),
       )
+    }
+    item {
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        Text(
+          "Quick add from Omi-compatible pendants",
+          style = MaterialTheme.typography.labelMedium,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        WakeWords.omiPresets.forEach { preset ->
+          TextButton(onClick = { applyOmiPreset(preset) }) {
+            Text(preset.label)
+          }
+        }
+      }
     }
     item { Button(onClick = viewModel::resetWakeWordsDefaults) { Text("Reset defaults") } }
     item {
@@ -694,6 +801,42 @@ fun SettingsSheet(viewModel: MainViewModel) {
 
     item { HorizontalDivider() }
 
+    // A2UI & Connection
+    item { Text("A2UI & Canvas", style = MaterialTheme.typography.titleSmall) }
+    item {
+      Text(
+        "Use these shortcuts during pairing to verify gateway connection and load A2UI.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+    }
+    item {
+      Button(onClick = { viewModel.refreshGatewayConnection() }) {
+        Text("Refresh Gateway Discovery")
+      }
+    }
+    item {
+      Button(
+        onClick = {
+          val loaded = viewModel.openGatewayA2uiCanvas()
+          pairingGuideFeedback =
+            if (loaded) {
+              "Loaded A2UI from gateway canvas host."
+            } else {
+              "A2UI host unavailable. Connect to a gateway first."
+            }
+        },
+      ) {
+        Text("Open A2UI Canvas")
+      }
+    }
+    item {
+      TextButton(onClick = { viewModel.openLocalCanvas() }) {
+        Text("Use Local Canvas")
+      }
+    }
+
+    item { HorizontalDivider() }
+
     // Debug
     item { Text("Debug", style = MaterialTheme.typography.titleSmall) }
     item {
@@ -712,6 +855,65 @@ fun SettingsSheet(viewModel: MainViewModel) {
     item { Spacer(modifier = Modifier.height(20.dp)) }
   }
 }
+
+private data class OmiPairingGuide(
+  val id: String,
+  val title: String,
+  val summary: String,
+  val steps: List<String>,
+  val footerTip: String,
+  val imageRes: Int,
+  val wakePresetId: String? = null,
+)
+
+private val omiPairingGuides: List<OmiPairingGuide> =
+  listOf(
+    OmiPairingGuide(
+      id = "omi_devkit",
+      title = "Omi Dev Kit 2",
+      summary = "Hold side button for ~2 seconds until the LED starts blinking.",
+      steps =
+        listOf(
+          "Keep the pendant charged and within a few feet of the phone.",
+          "Hold the side button for ~2 seconds until the LED blinks red (pairing mode).",
+          "In OpenClaw, connect to your gateway and approve pairing when prompted.",
+          "Optionally apply the Omi wake words from this guide.",
+        ),
+      footerTip = "Tip: after pairing, use Open A2UI Canvas below to verify the live canvas host.",
+      imageRes = R.mipmap.ic_launcher_foreground,
+      wakePresetId = "omi_devkit",
+    ),
+    OmiPairingGuide(
+      id = "friend_pendant",
+      title = "Friend Pendant",
+      summary = "Long-press the button until pairing feedback appears.",
+      steps =
+        listOf(
+          "Confirm Bluetooth is enabled on the phone and pendant battery is charged.",
+          "Long-press the pendant button until pairing feedback appears.",
+          "Approve the pending pairing request from OpenClaw.",
+          "Optionally apply Friend wake words for migration.",
+        ),
+      footerTip = "Tip: if discovery stalls, tap Refresh Gateway Discovery and retry pairing.",
+      imageRes = R.mipmap.ic_launcher_foreground,
+      wakePresetId = "friend_pendant",
+    ),
+    OmiPairingGuide(
+      id = "limitless",
+      title = "Limitless Pendant",
+      summary = "Enter pairing mode, then accept pairing from OpenClaw.",
+      steps =
+        listOf(
+          "Use the pendant button combination to enter pairing mode.",
+          "Keep the pendant close while OpenClaw discovery is active.",
+          "Approve the pairing request in OpenClaw when shown.",
+          "Optionally apply Limitless wake words.",
+        ),
+      footerTip = "Tip: open A2UI Canvas after pairing to verify the device is live.",
+      imageRes = R.mipmap.ic_launcher_foreground,
+      wakePresetId = "limitless",
+    ),
+  )
 
 private fun openAppSettings(context: Context) {
   val intent =

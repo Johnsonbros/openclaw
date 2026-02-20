@@ -17,7 +17,7 @@ import java.util.UUID
 
 class SecurePrefs(context: Context) {
   companion object {
-    val defaultWakeWords: List<String> = listOf("openclaw", "claude")
+    val defaultWakeWords: List<String> = listOf("zeke", "openclaw", "claude")
     private const val displayNameKey = "node.displayName"
     private const val voiceWakeModeKey = "voiceWake.mode"
   }
@@ -55,16 +55,17 @@ class SecurePrefs(context: Context) {
   private val _preventSleep = MutableStateFlow(prefs.getBoolean("screen.preventSleep", true))
   val preventSleep: StateFlow<Boolean> = _preventSleep
 
+  // ZEKE defaults — auto-connect to our gateway via Tailscale
   private val _manualEnabled =
-    MutableStateFlow(prefs.getBoolean("gateway.manual.enabled", false))
+    MutableStateFlow(prefs.getBoolean("gateway.manual.enabled", true))
   val manualEnabled: StateFlow<Boolean> = _manualEnabled
 
   private val _manualHost =
-    MutableStateFlow(prefs.getString("gateway.manual.host", "") ?: "")
+    MutableStateFlow(prefs.getString("gateway.manual.host", "zeke.tail5b81a2.ts.net") ?: "zeke.tail5b81a2.ts.net")
   val manualHost: StateFlow<String> = _manualHost
 
   private val _manualPort =
-    MutableStateFlow(prefs.getInt("gateway.manual.port", 18789))
+    MutableStateFlow(prefs.getInt("gateway.manual.port", 443))
   val manualPort: StateFlow<Int> = _manualPort
 
   private val _manualTls =
@@ -72,7 +73,7 @@ class SecurePrefs(context: Context) {
   val manualTls: StateFlow<Boolean> = _manualTls
 
   private val _gatewayToken =
-    MutableStateFlow(prefs.getString("gateway.manual.token", "") ?: "")
+    MutableStateFlow(prefs.getString("gateway.manual.token", "493fb5919a16b885fe34bcded2b5e5df4f5c3f2166c361d9") ?: "")
   val gatewayToken: StateFlow<String> = _gatewayToken
 
   private val _lastDiscoveredStableId =

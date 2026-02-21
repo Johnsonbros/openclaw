@@ -73,4 +73,31 @@ class ConnectionManagerTest {
     assertNull(on?.expectedFingerprint)
     assertEquals(false, on?.allowTOFU)
   }
+
+  @Test
+  fun resolveTlsParamsForEndpoint_tailscaleHostBypassesTlsPinning() {
+    val endpoint = GatewayEndpoint.manual(host = "zeke.tail5b81a2.ts.net", port = 443)
+
+    val params =
+      ConnectionManager.resolveTlsParamsForEndpoint(
+        endpoint,
+        storedFingerprint = "stored-pin",
+        manualTlsEnabled = true,
+      )
+    assertNull(params)
+  }
+
+  @Test
+  fun resolveTlsParamsForEndpoint_nonTailscaleHostStillRequiresTls() {
+    val endpoint = GatewayEndpoint.manual(host = "gateway.example.com", port = 443)
+
+    val params =
+      ConnectionManager.resolveTlsParamsForEndpoint(
+        endpoint,
+        storedFingerprint = null,
+        manualTlsEnabled = true,
+      )
+    assertNull(params?.expectedFingerprint)
+    assertEquals(true, params?.required)
+  }
 }

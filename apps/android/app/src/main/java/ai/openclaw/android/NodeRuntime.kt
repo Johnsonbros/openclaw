@@ -434,12 +434,15 @@ class NodeRuntime(context: Context) {
           if (host.isNotEmpty() && port in 1..65535) {
             // Security: autoconnect only to previously trusted gateways (stored TLS pin).
             if (!manualTls.value) return@collect
-            val stableId = GatewayEndpoint.manual(host = host, port = port).stableId
-            val storedFingerprint = prefs.loadGatewayTlsFingerprint(stableId)?.trim().orEmpty()
-            if (storedFingerprint.isEmpty()) return@collect
+            val ep = GatewayEndpoint.manual(host = host, port = port)
+            // Tailscale (.ts.net) bypasses TLS pinning; resolveTlsParams returns null.
+            if (connectionManager.resolveTlsParams(ep) != null) {
+              val storedFingerprint = prefs.loadGatewayTlsFingerprint(ep.stableId)?.trim().orEmpty()
+              if (storedFingerprint.isEmpty()) return@collect
+            }
 
             didAutoConnect = true
-            connect(GatewayEndpoint.manual(host = host, port = port))
+            connect(ep)
           }
           return@collect
         }

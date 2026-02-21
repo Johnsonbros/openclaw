@@ -32,6 +32,10 @@ class ConnectionManager(
       storedFingerprint: String?,
       manualTlsEnabled: Boolean,
     ): GatewayTlsParams? {
+      // Tailscale (.ts.net) provides its own encryption and mutual identity —
+      // skip self-signed cert fingerprint pinning.
+      if (endpoint.host.endsWith(".ts.net")) return null
+
       val stableId = endpoint.stableId
       val stored = storedFingerprint?.trim().takeIf { !it.isNullOrEmpty() }
       val isManual = stableId.startsWith("manual|")

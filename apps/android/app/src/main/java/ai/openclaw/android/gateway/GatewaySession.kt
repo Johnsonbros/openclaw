@@ -191,9 +191,10 @@ class GatewaySession(
       }
 
     suspend fun connect() {
-      val scheme = if (tls != null) "wss" else "ws"
+      val useTls = tls != null || endpoint.host.endsWith(".ts.net")
+      val scheme = if (useTls) "wss" else "ws"
       val url = "$scheme://${endpoint.host}:${endpoint.port}"
-      val httpScheme = if (tls != null) "https" else "http"
+      val httpScheme = if (useTls) "https" else "http"
       val origin = "$httpScheme://${endpoint.host}:${endpoint.port}"
       val request = Request.Builder().url(url).header("Origin", origin).build()
       socket = client.newWebSocket(request, Listener())

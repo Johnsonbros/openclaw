@@ -11,6 +11,8 @@
         <string>run</string>
         <string>--port</string>
         <string>18789</string>
+        <string>--bind</string>
+        <string>lan</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>

@@ -316,11 +316,16 @@ class TalkModeManager(
       Log.d(tag, "chat.send start sessionKey=${mainSessionKey.ifBlank { "main" }} chars=${prompt.length}")
       val runId = sendChat(prompt, session)
       Log.d(tag, "chat.send ok runId=$runId")
-      val ok = waitForChatFinal(runId)
-      if (!ok) {
-        Log.w(tag, "chat final timeout runId=$runId; attempting history fallback")
+      val ok = if (supportsChatSubscribe) {
+        val result = waitForChatFinal(runId)
+        if (!result) {
+          Log.w(tag, "chat final timeout runId=$runId; attempting history fallback")
+        }
+        result
+      } else {
+        false
       }
-      val assistant = waitForAssistantText(session, startedAt, if (ok) 12_000 else 25_000)
+      val assistant = waitForAssistantText(session, startedAt, if (ok) 12_000 else 30_000)
       if (assistant.isNullOrBlank()) {
         _statusText.value = "No reply"
         Log.w(tag, "assistant text timeout runId=$runId")

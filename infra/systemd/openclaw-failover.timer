@@ -3,8 +3,8 @@ Description=OpenClaw Failover Check Timer
 
 [Timer]
 OnBootSec=30
-OnUnitActiveSec=60
-AccuracySec=5s
+OnUnitActiveSec=15
+AccuracySec=1s
 
 [Install]
 WantedBy=timers.target

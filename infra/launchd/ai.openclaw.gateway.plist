@@ -6,13 +6,8 @@
     <string>ai.openclaw.gateway</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/openclaw</string>
-        <string>gateway</string>
-        <string>run</string>
-        <string>--port</string>
-        <string>18789</string>
-        <string>--bind</string>
-        <string>lan</string>
+        <string>/bin/bash</string>
+        <string>/Users/njohnson89/.openclaw/scripts/gateway-start.sh</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>

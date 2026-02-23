@@ -1,0 +1,12 @@
+[Unit]
+Description=OpenClaw Failover Health Check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/ubuntu/openclaw-failover.sh
+User=root
+
+[Install]
+WantedBy=multi-user.target

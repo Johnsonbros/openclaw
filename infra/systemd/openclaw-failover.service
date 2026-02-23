@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/home/ubuntu/openclaw-failover.sh
+ExecStart=/usr/local/sbin/openclaw-failover.sh
 User=root
 
 [Install]

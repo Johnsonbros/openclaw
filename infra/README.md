@@ -61,10 +61,10 @@ infra/
 
 ### zeke Setup
 
-1. Copy failover script:
+1. Install failover script (root-owned to prevent privilege escalation):
    ```bash
-   scp infra/scripts/openclaw-failover.sh ubuntu@zeke:/home/ubuntu/
-   ssh ubuntu@zeke "chmod +x /home/ubuntu/openclaw-failover.sh"
+   scp infra/scripts/openclaw-failover.sh ubuntu@zeke:/tmp/
+   ssh ubuntu@zeke "sudo mv /tmp/openclaw-failover.sh /usr/local/sbin/ && sudo chown root:root /usr/local/sbin/openclaw-failover.sh && sudo chmod 755 /usr/local/sbin/openclaw-failover.sh"
    ```
 
 2. Install systemd units:

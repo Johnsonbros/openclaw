@@ -30,6 +30,41 @@ macOS split:
 - **node host service** forwards `system.run` to the **macOS app** over local IPC.
 - **macOS app** enforces approvals + executes the command in UI context.
 
+## Remote node execution
+
+When the gateway invokes `system.run` on a remote node (Windows PC, Android device, etc.),
+approvals are checked **on the gateway**, not the remote node. The remote node simply executes
+whatever commands the gateway sends after approval.
+
+This means:
+
+- Configure `tools.exec.*` and `exec-approvals.json` **on the gateway machine**
+- Remote nodes inherit the gateway's approval policy
+- The node's local `exec-approvals.json` only applies to local CLI usage on that node
+
+To allow the gateway to run commands on remote nodes without prompts:
+
+```json5
+// ~/.openclaw/openclaw.json on the GATEWAY
+{
+  "tools": {
+    "exec": {
+      "security": "full",  // or "allowlist" with patterns
+      "ask": "off"
+    }
+  }
+}
+```
+
+Or use the CLI:
+
+```bash
+openclaw config set tools.exec.security full
+openclaw config set tools.exec.ask off
+```
+
+For allowlist mode, add patterns to `~/.openclaw/exec-approvals.json` on the gateway.
+
 ## Settings and storage
 
 Approvals live in a local JSON file on the execution host:

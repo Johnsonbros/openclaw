@@ -167,7 +167,7 @@ export class BrowserNodeClient {
 
     if (isSecureContext && deviceIdentity) {
       const signedAtMs = Date.now();
-      const nonce = this.connectNonce ?? undefined;
+      const nonce = this.connectNonce ?? "";
       const payload = buildDeviceAuthPayload({
         deviceId: deviceIdentity.deviceId,
         clientId: GATEWAY_CLIENT_IDS.WEBCHAT_NODE,

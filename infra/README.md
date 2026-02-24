@@ -8,8 +8,9 @@ Operational scripts and service definitions for running OpenClaw in a Mac-primar
 infra/
 ├── README.md              # This file
 ├── scripts/
-│   ├── db-sync.sh         # PostgreSQL Mac → zeke replication (5min interval)
-│   ├── health-check.sh    # Mac gateway health verification
+│   ├── gateway-start.sh      # Mac gateway startup wrapper
+│   ├── db-sync.sh            # PostgreSQL Mac → zeke replication (5min interval)
+│   ├── health-check.sh       # Mac gateway health verification
 │   └── openclaw-failover.sh  # zeke failover watchdog
 ├── launchd/
 │   ├── ai.openclaw.gateway.plist   # Mac gateway service
@@ -17,14 +18,14 @@ infra/
 │   └── ai.openclaw.db-sync.plist   # Mac DB sync timer
 └── systemd/
     ├── openclaw-failover.service   # zeke failover oneshot
-    └── openclaw-failover.timer     # zeke 60s health check timer
+    └── openclaw-failover.timer     # zeke 15s health check timer
 ```
 
 ## Setup
 
 ### Prerequisites
 
-- **Mac**: Docker Desktop, Node.js 22+, Tailscale, OpenClaw (`npm install -g openclaw@latest`)
+- **Mac**: Docker Desktop, Node.js 22+, Tailscale, OpenClaw (`npm install -g openclaw@latest`), Bun (`curl -fsSL https://bun.sh/install | bash`), qmd (memory search backend)
 - **zeke**: Docker, Tailscale, systemd, SSH access via `ZEKE.pem`
 
 ### Mac Setup
@@ -48,7 +49,7 @@ infra/
 3. Copy scripts to `~/.openclaw/scripts/`:
    ```bash
    mkdir -p ~/.openclaw/scripts
-   cp infra/scripts/db-sync.sh infra/scripts/health-check.sh ~/.openclaw/scripts/
+   cp infra/scripts/gateway-start.sh infra/scripts/db-sync.sh infra/scripts/health-check.sh ~/.openclaw/scripts/
    chmod +x ~/.openclaw/scripts/*.sh
    ```
 

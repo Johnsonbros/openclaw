@@ -22,7 +22,7 @@ ZEKE runs as a personal AI assistant across two hosts in a primary/failover conf
 │  │   Mac (Primary)      │  │   zeke EC2 (Backup)  │ │
 │  │                      │  │                      │ │
 │  │  OpenClaw Gateway    │  │  Failover Watchdog   │ │
-│  │  (:18789, bind=lan)  │  │  (60s health check)  │ │
+│  │  (:18789, bind=lan)  │  │  (15s health check)  │ │
 │  │                      │  │                      │ │
 │  │  OpenClaw Node       │  │  OpenClaw Gateway    │ │
 │  │  (localhost connect)  │  │  (disabled, started  │ │
@@ -62,13 +62,13 @@ ZEKE runs as a personal AI assistant across two hosts in a primary/failover conf
 - `ai.openclaw.db-sync` — PostgreSQL sync to zeke every 5 minutes
 
 **zeke (systemd):**
-- `openclaw-failover.timer` — 60s health check of Mac gateway
+- `openclaw-failover.timer` — 15s health check of Mac gateway
 - `openclaw-failover.service` — Starts/stops local gateway based on Mac availability
 - `openclaw-update.timer` — Nightly update check at 08:00 UTC
 
 ### Failover Behavior
 
-1. Every 60 seconds, zeke's failover watchdog checks `http://100.82.144.92:18789/`
+1. Every 15 seconds, zeke's failover watchdog checks `http://100.82.144.92:18789/`
 2. If Mac is reachable and zeke's gateway is running → stops zeke's gateway
 3. If Mac is unreachable and zeke's gateway is not running → restores latest DB backup, starts zeke's gateway
 4. When Mac comes back, zeke automatically shuts down its gateway
@@ -90,7 +90,8 @@ Mac pushes a full `pg_dump` to zeke every 5 minutes. The sync script:
 | `~/.openclaw/.env` | All API keys and secrets (600 perms) |
 | `~/.openclaw/node.json` | Node host config |
 | `~/.openclaw/agents/` | Agent directories (main, huginn, muninn, oden) |
-| `~/.openclaw/scripts/` | Operational scripts (db-sync, health-check) |
+| `~/.openclaw/scripts/` | Operational scripts (gateway-start, db-sync, health-check) |
+| `~/.local/lib/qmd/` | qmd memory search backend (requires Bun runtime) |
 | `~/.openclaw/logs/` | Service and sync logs |
 | `~/Library/LaunchAgents/ai.openclaw.*.plist` | launchd service definitions |
 
@@ -99,7 +100,7 @@ Mac pushes a full `pg_dump` to zeke every 5 minutes. The sync script:
 |------|---------|
 | `/home/ubuntu/.openclaw/` | OpenClaw home directory |
 | `/home/ubuntu/.openclaw/.env` | API keys (server copy) |
-| `/home/ubuntu/openclaw-failover.sh` | Failover watchdog script |
+| `/usr/local/sbin/openclaw-failover.sh` | Failover watchdog script |
 | `/etc/systemd/system/openclaw-failover.*` | Failover timer + service units |
 | `/var/log/openclaw-failover.log` | Failover activity log |
 
@@ -138,5 +139,5 @@ launchctl list | grep openclaw
 
 ## Changelog
 
-- **2026-02-23**: Migrated primary gateway from zeke to Mac. Added failover watchdog, DB sync, health checks. Hardened all configs with env var token references.
+- **2026-02-23**: Migrated primary gateway from zeke to Mac. Added failover watchdog, DB sync, health checks. Hardened all configs with env var token references. Installed qmd + Bun for memory backend. Migrated ZEKE personality files and 361 session files from zeke. Changed Telegram dmPolicy to "open". Removed legacy cron jobs (gateway-watchdog, auto-recover) from zeke. Fixed corrupted qmd SQLite indexes. Created Oden AGENT.md.
 - **2026-02-17**: Last upstream sync.

@@ -17,15 +17,6 @@ function isEnvVarPlaceholder(value: string): boolean {
   return ENV_VAR_PLACEHOLDER_PATTERN.test(value.trim());
 }
 
-function isExtensionPath(path: string): boolean {
-  return (
-    path === "plugins" ||
-    path.startsWith("plugins.") ||
-    path === "channels" ||
-    path.startsWith("channels.")
-  );
-}
-
 function isExplicitlyNonSensitivePath(hints: ConfigUiHints | undefined, paths: string[]): boolean {
   if (!hints) {
     return false;
@@ -130,9 +121,8 @@ function redactObjectWithLookup(
   if (Array.isArray(obj)) {
     const path = `${prefix}[]`;
     if (!lookup.has(path)) {
-      if (!isExtensionPath(prefix)) {
-        return obj;
-      }
+      // Keep behavior symmetric with object fallback: if hints miss the path,
+      // still run pattern-based guessing for non-extension arrays.
       return redactObjectGuessing(obj, prefix, values, hints);
     }
     return obj.map((item) => {
@@ -164,7 +154,10 @@ function redactObjectWithLookup(
           break;
         }
       }
-      if (!matched && isExtensionPath(path)) {
+      if (!matched) {
+        // Fall back to pattern-based guessing for paths not covered by schema
+        // hints. This catches dynamic keys inside catchall objects (for example
+        // env.GROQ_API_KEY) and extension/plugin config alike.
         const markedNonSensitive = isExplicitlyNonSensitivePath(hints, [path, wildcardPath]);
         if (
           typeof value === "string" &&
@@ -404,6 +397,20 @@ function toObjectRecord(value: unknown): Record<string, unknown> {
   return {};
 }
 
+function shouldPassThroughRestoreValue(incoming: unknown): boolean {
+  return incoming === null || incoming === undefined || typeof incoming !== "object";
+}
+
+function toRestoreArrayContext(
+  incoming: unknown,
+  prefix: string,
+): { incoming: unknown[]; path: string } | null {
+  if (!Array.isArray(incoming)) {
+    return null;
+  }
+  return { incoming, path: `${prefix}[]` };
+}
+
 function restoreArrayItemWithLookup(params: {
   item: unknown;
   index: number;
@@ -478,26 +485,24 @@ function restoreRedactedValuesWithLookup(
   prefix: string,
   hints: ConfigUiHints,
 ): unknown {
-  if (incoming === null || incoming === undefined) {
+  if (shouldPassThroughRestoreValue(incoming)) {
     return incoming;
   }
-  if (typeof incoming !== "object") {
-    return incoming;
-  }
-  if (Array.isArray(incoming)) {
+
+  const arrayContext = toRestoreArrayContext(incoming, prefix);
+  if (arrayContext) {
     // Note: If the user removed an item in the middle of the array,
     // we have no way of knowing which one. In this case, the last
     // element(s) get(s) chopped off. Not good, so please don't put
     // sensitive string array in the config...
-    const path = `${prefix}[]`;
+    const { incoming: incomingArray, path } = arrayContext;
     if (!lookup.has(path)) {
-      if (!isExtensionPath(prefix)) {
-        return incoming;
-      }
-      return restoreRedactedValuesGuessing(incoming, original, prefix, hints);
+      // Keep behavior symmetric with object fallback: if hints miss the path,
+      // still run pattern-based guessing for non-extension arrays.
+      return restoreRedactedValuesGuessing(incomingArray, original, prefix, hints);
     }
     return mapRedactedArray({
-      incoming,
+      incoming: incomingArray,
       original,
       path,
       mapItem: (item, index, originalArray) =>
@@ -529,7 +534,7 @@ function restoreRedactedValuesWithLookup(
         break;
       }
     }
-    if (!matched && isExtensionPath(path)) {
+    if (!matched) {
       const markedNonSensitive = isExplicitlyNonSensitivePath(hints, [path, wildcardPath]);
       if (!markedNonSensitive && isSensitivePath(path) && value === REDACTED_SENTINEL) {
         result[key] = restoreOriginalValueOrThrow({ key, path, original: orig });
@@ -551,19 +556,18 @@ function restoreRedactedValuesGuessing(
   prefix: string,
   hints?: ConfigUiHints,
 ): unknown {
-  if (incoming === null || incoming === undefined) {
+  if (shouldPassThroughRestoreValue(incoming)) {
     return incoming;
   }
-  if (typeof incoming !== "object") {
-    return incoming;
-  }
-  if (Array.isArray(incoming)) {
+
+  const arrayContext = toRestoreArrayContext(incoming, prefix);
+  if (arrayContext) {
     // Note: If the user removed an item in the middle of the array,
     // we have no way of knowing which one. In this case, the last
     // element(s) get(s) chopped off. Not good, so please don't put
     // sensitive string array in the config...
-    const path = `${prefix}[]`;
-    return restoreGuessingArray(incoming, original, path, hints);
+    const { incoming: incomingArray, path } = arrayContext;
+    return restoreGuessingArray(incomingArray, original, path, hints);
   }
   const orig = toObjectRecord(original);
   const result: Record<string, unknown> = {};

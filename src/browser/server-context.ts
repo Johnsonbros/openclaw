@@ -15,7 +15,12 @@ import {
   ensureChromeExtensionRelayServer,
   stopChromeExtensionRelayServer,
 } from "./extension-relay.js";
-import { assertBrowserNavigationAllowed } from "./navigation-guard.js";
+import {
+  assertBrowserNavigationAllowed,
+  assertBrowserNavigationResultAllowed,
+  InvalidBrowserNavigationUrlError,
+  withBrowserNavigationPolicy,
+} from "./navigation-guard.js";
 import type { PwAiModule } from "./pw-ai-module.js";
 import { getPwAiModule } from "./pw-ai-module.js";
 import {
@@ -132,8 +137,7 @@ function createProfileContext(
   };
 
   const openTab = async (url: string): Promise<BrowserTab> => {
-    const ssrfPolicy = state().resolved.ssrfPolicy;
-    await assertBrowserNavigationAllowed({ url, ssrfPolicy });
+    const ssrfPolicyOpts = withBrowserNavigationPolicy(state().resolved.ssrfPolicy);
 
     // For remote profiles, use Playwright's persistent connection to create tabs
     // This ensures the tab persists beyond a single request
@@ -144,7 +148,7 @@ function createProfileContext(
         const page = await createPageViaPlaywright({
           cdpUrl: profile.cdpUrl,
           url,
-          ...(ssrfPolicy ? { ssrfPolicy } : {}),
+          ...ssrfPolicyOpts,
         });
         const profileState = getProfileState();
         profileState.lastTargetId = page.targetId;
@@ -160,7 +164,7 @@ function createProfileContext(
     const createdViaCdp = await createTargetViaCdp({
       cdpUrl: profile.cdpUrl,
       url,
-      ...(ssrfPolicy ? { ssrfPolicy } : {}),
+      ...ssrfPolicyOpts,
     })
       .then((r) => r.targetId)
       .catch(() => null);
@@ -173,6 +177,7 @@ function createProfileContext(
         const tabs = await listTabs().catch(() => [] as BrowserTab[]);
         const found = tabs.find((t) => t.targetId === createdViaCdp);
         if (found) {
+          await assertBrowserNavigationResultAllowed({ url: found.url, ...ssrfPolicyOpts });
           return found;
         }
         await new Promise((r) => setTimeout(r, 100));
@@ -190,6 +195,7 @@ function createProfileContext(
     };
 
     const endpointUrl = new URL(appendCdpPath(profile.cdpUrl, "/json/new"));
+    await assertBrowserNavigationAllowed({ url, ...ssrfPolicyOpts });
     const endpoint = endpointUrl.search
       ? (() => {
           endpointUrl.searchParams.set("url", url);
@@ -210,10 +216,12 @@ function createProfileContext(
     }
     const profileState = getProfileState();
     profileState.lastTargetId = created.id;
+    const resolvedUrl = created.url ?? url;
+    await assertBrowserNavigationResultAllowed({ url: resolvedUrl, ...ssrfPolicyOpts });
     return {
       targetId: created.id,
       title: created.title ?? "",
-      url: created.url ?? url,
+      url: resolvedUrl,
       wsUrl: normalizeWsUrl(created.webSocketDebuggerUrl, profile.cdpUrl),
       type: created.type,
     };
@@ -406,8 +414,12 @@ function createProfileContext(
     };
 
     let chosen = targetId ? resolveById(targetId) : pickDefault();
-    if (!chosen && profile.driver === "extension" && candidates.length === 1) {
-      // If an agent passes a stale/foreign targetId but we only have a single attached tab,
+    if (
+      !chosen &&
+      (profile.driver === "extension" || !profile.cdpIsLoopback) &&
+      candidates.length === 1
+    ) {
+      // If an agent passes a stale/foreign targetId but only one candidate remains,
       // recover by using that tab instead of failing hard.
       chosen = candidates[0] ?? null;
     }
@@ -422,7 +434,7 @@ function createProfileContext(
     return chosen;
   };
 
-  const focusTab = async (targetId: string): Promise<void> => {
+  const resolveTargetIdOrThrow = async (targetId: string): Promise<string> => {
     const tabs = await listTabs();
     const resolved = resolveTargetIdFromTabs(targetId, tabs);
     if (!resolved.ok) {
@@ -431,6 +443,11 @@ function createProfileContext(
       }
       throw new Error("tab not found");
     }
+    return resolved.targetId;
+  };
+
+  const focusTab = async (targetId: string): Promise<void> => {
+    const resolvedTargetId = await resolveTargetIdOrThrow(targetId);
 
     if (!profile.cdpIsLoopback) {
       const mod = await getPwAiModule({ mode: "strict" });
@@ -439,28 +456,21 @@ function createProfileContext(
       if (typeof focusPageByTargetIdViaPlaywright === "function") {
         await focusPageByTargetIdViaPlaywright({
           cdpUrl: profile.cdpUrl,
-          targetId: resolved.targetId,
+          targetId: resolvedTargetId,
         });
         const profileState = getProfileState();
-        profileState.lastTargetId = resolved.targetId;
+        profileState.lastTargetId = resolvedTargetId;
         return;
       }
     }
 
-    await fetchOk(appendCdpPath(profile.cdpUrl, `/json/activate/${resolved.targetId}`));
+    await fetchOk(appendCdpPath(profile.cdpUrl, `/json/activate/${resolvedTargetId}`));
     const profileState = getProfileState();
-    profileState.lastTargetId = resolved.targetId;
+    profileState.lastTargetId = resolvedTargetId;
   };
 
   const closeTab = async (targetId: string): Promise<void> => {
-    const tabs = await listTabs();
-    const resolved = resolveTargetIdFromTabs(targetId, tabs);
-    if (!resolved.ok) {
-      if (resolved.reason === "ambiguous") {
-        throw new Error("ambiguous target id prefix");
-      }
-      throw new Error("tab not found");
-    }
+    const resolvedTargetId = await resolveTargetIdOrThrow(targetId);
 
     // For remote profiles, use Playwright's persistent connection to close tabs
     if (!profile.cdpIsLoopback) {
@@ -470,13 +480,13 @@ function createProfileContext(
       if (typeof closePageByTargetIdViaPlaywright === "function") {
         await closePageByTargetIdViaPlaywright({
           cdpUrl: profile.cdpUrl,
-          targetId: resolved.targetId,
+          targetId: resolvedTargetId,
         });
         return;
       }
     }
 
-    await fetchOk(appendCdpPath(profile.cdpUrl, `/json/close/${resolved.targetId}`));
+    await fetchOk(appendCdpPath(profile.cdpUrl, `/json/close/${resolvedTargetId}`));
   };
 
   const stopRunningBrowser = async (): Promise<{ stopped: boolean }> => {
@@ -645,10 +655,10 @@ export function createBrowserRouteContext(opts: ContextOptions): BrowserRouteCon
     if (err instanceof SsrFBlockedError) {
       return { status: 400, message: err.message };
     }
-    const msg = String(err);
-    if (msg.includes("Invalid URL:")) {
-      return { status: 400, message: msg };
+    if (err instanceof InvalidBrowserNavigationUrlError) {
+      return { status: 400, message: err.message };
     }
+    const msg = String(err);
     if (msg.includes("ambiguous target id prefix")) {
       return { status: 409, message: "ambiguous target id prefix" };
     }

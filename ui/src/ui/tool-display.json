@@ -25,9 +25,9 @@
     ]
   },
   "tools": {
-    "bash": {
+    "exec": {
       "icon": "wrench",
-      "title": "Bash",
+      "title": "Exec",
       "detailKeys": ["command"]
     },
     "process": {
@@ -49,6 +49,11 @@
       "icon": "penLine",
       "title": "Edit",
       "detailKeys": ["path"]
+    },
+    "apply_patch": {
+      "icon": "bandage",
+      "title": "Apply Patch",
+      "detailKeys": []
     },
     "attach": {
       "icon": "paperclip",
@@ -139,7 +144,7 @@
       }
     },
     "cron": {
-      "icon": "loader",
+      "icon": "clock",
       "title": "Cron",
       "actions": {
         "status": { "label": "status" },
@@ -159,18 +164,145 @@
       "icon": "plug",
       "title": "Gateway",
       "actions": {
-        "restart": { "label": "restart", "detailKeys": ["reason", "delayMs"] },
-        "config.get": { "label": "config get" },
-        "config.schema": { "label": "config schema" },
-        "config.apply": {
-          "label": "config apply",
-          "detailKeys": ["restartDelayMs"]
-        },
-        "update.run": {
-          "label": "update run",
-          "detailKeys": ["restartDelayMs"]
-        }
+        "restart": { "label": "restart", "detailKeys": ["reason", "delayMs"] }
       }
+    },
+    "message": {
+      "icon": "mail",
+      "title": "Message",
+      "actions": {
+        "send": {
+          "label": "send",
+          "detailKeys": ["provider", "to", "media", "replyTo", "threadId"]
+        },
+        "poll": { "label": "poll", "detailKeys": ["provider", "to", "pollQuestion"] },
+        "react": {
+          "label": "react",
+          "detailKeys": ["provider", "to", "messageId", "emoji", "remove"]
+        },
+        "reactions": {
+          "label": "reactions",
+          "detailKeys": ["provider", "to", "messageId", "limit"]
+        },
+        "read": { "label": "read", "detailKeys": ["provider", "to", "limit"] },
+        "edit": { "label": "edit", "detailKeys": ["provider", "to", "messageId"] },
+        "delete": { "label": "delete", "detailKeys": ["provider", "to", "messageId"] },
+        "pin": { "label": "pin", "detailKeys": ["provider", "to", "messageId"] },
+        "unpin": { "label": "unpin", "detailKeys": ["provider", "to", "messageId"] },
+        "list-pins": { "label": "list pins", "detailKeys": ["provider", "to"] },
+        "permissions": { "label": "permissions", "detailKeys": ["provider", "channelId", "to"] },
+        "thread-create": {
+          "label": "thread create",
+          "detailKeys": ["provider", "channelId", "threadName"]
+        },
+        "thread-list": {
+          "label": "thread list",
+          "detailKeys": ["provider", "guildId", "channelId"]
+        },
+        "thread-reply": {
+          "label": "thread reply",
+          "detailKeys": ["provider", "channelId", "messageId"]
+        },
+        "search": { "label": "search", "detailKeys": ["provider", "guildId", "query"] },
+        "sticker": { "label": "sticker", "detailKeys": ["provider", "to", "stickerId"] },
+        "member-info": { "label": "member", "detailKeys": ["provider", "guildId", "userId"] },
+        "role-info": { "label": "roles", "detailKeys": ["provider", "guildId"] },
+        "emoji-list": { "label": "emoji list", "detailKeys": ["provider", "guildId"] },
+        "emoji-upload": {
+          "label": "emoji upload",
+          "detailKeys": ["provider", "guildId", "emojiName"]
+        },
+        "sticker-upload": {
+          "label": "sticker upload",
+          "detailKeys": ["provider", "guildId", "stickerName"]
+        },
+        "role-add": {
+          "label": "role add",
+          "detailKeys": ["provider", "guildId", "userId", "roleId"]
+        },
+        "role-remove": {
+          "label": "role remove",
+          "detailKeys": ["provider", "guildId", "userId", "roleId"]
+        },
+        "channel-info": { "label": "channel", "detailKeys": ["provider", "channelId"] },
+        "channel-list": { "label": "channels", "detailKeys": ["provider", "guildId"] },
+        "voice-status": { "label": "voice", "detailKeys": ["provider", "guildId", "userId"] },
+        "event-list": { "label": "events", "detailKeys": ["provider", "guildId"] },
+        "event-create": {
+          "label": "event create",
+          "detailKeys": ["provider", "guildId", "eventName"]
+        },
+        "timeout": { "label": "timeout", "detailKeys": ["provider", "guildId", "userId"] },
+        "kick": { "label": "kick", "detailKeys": ["provider", "guildId", "userId"] },
+        "ban": { "label": "ban", "detailKeys": ["provider", "guildId", "userId"] }
+      }
+    },
+    "agents_list": {
+      "icon": "compass",
+      "title": "Agents",
+      "detailKeys": []
+    },
+    "sessions_list": {
+      "icon": "folderOpen",
+      "title": "Sessions",
+      "detailKeys": ["kinds", "limit", "activeMinutes", "messageLimit"]
+    },
+    "sessions_history": {
+      "icon": "fileText",
+      "title": "Session History",
+      "detailKeys": ["sessionKey", "limit", "includeTools"]
+    },
+    "sessions_send": {
+      "icon": "send",
+      "title": "Session Send",
+      "detailKeys": ["label", "sessionKey", "agentId", "timeoutSeconds"]
+    },
+    "sessions_spawn": {
+      "icon": "userCog",
+      "title": "Sub-agent",
+      "detailKeys": [
+        "label",
+        "task",
+        "agentId",
+        "model",
+        "thinking",
+        "runTimeoutSeconds",
+        "cleanup"
+      ]
+    },
+    "subagents": {
+      "icon": "bot",
+      "title": "Subagents",
+      "actions": {
+        "list": { "label": "list", "detailKeys": ["recentMinutes"] },
+        "kill": { "label": "kill", "detailKeys": ["target"] },
+        "steer": { "label": "steer", "detailKeys": ["target"] }
+      }
+    },
+    "session_status": {
+      "icon": "barChart",
+      "title": "Session Status",
+      "detailKeys": ["sessionKey", "model"]
+    },
+    "memory_search": {
+      "icon": "brain",
+      "title": "Memory Search",
+      "detailKeys": ["query"]
+    },
+    "memory_get": {
+      "icon": "notebook",
+      "title": "Memory Get",
+      "detailKeys": ["path", "from", "lines"]
+    },
+    "web_search": {
+      "icon": "search",
+      "title": "Web Search",
+      "detailKeys": ["query", "count"]
+    },
+    "web_fetch": {
+      "icon": "fileText",
+      "title": "Web Fetch",
+      "detailKeys": ["url", "extractMode", "maxChars"]
     },
     "whatsapp_login": {
       "icon": "circle",
@@ -178,58 +310,6 @@
       "actions": {
         "start": { "label": "start" },
         "wait": { "label": "wait" }
-      }
-    },
-    "discord": {
-      "icon": "messageSquare",
-      "title": "Discord",
-      "actions": {
-        "react": { "label": "react", "detailKeys": ["channelId", "messageId", "emoji"] },
-        "reactions": { "label": "reactions", "detailKeys": ["channelId", "messageId"] },
-        "sticker": { "label": "sticker", "detailKeys": ["to", "stickerIds"] },
-        "poll": { "label": "poll", "detailKeys": ["question", "to"] },
-        "permissions": { "label": "permissions", "detailKeys": ["channelId"] },
-        "readMessages": { "label": "read messages", "detailKeys": ["channelId", "limit"] },
-        "sendMessage": { "label": "send", "detailKeys": ["to", "content"] },
-        "editMessage": { "label": "edit", "detailKeys": ["channelId", "messageId"] },
-        "deleteMessage": { "label": "delete", "detailKeys": ["channelId", "messageId"] },
-        "threadCreate": { "label": "thread create", "detailKeys": ["channelId", "name"] },
-        "threadList": { "label": "thread list", "detailKeys": ["guildId", "channelId"] },
-        "threadReply": { "label": "thread reply", "detailKeys": ["channelId", "content"] },
-        "pinMessage": { "label": "pin", "detailKeys": ["channelId", "messageId"] },
-        "unpinMessage": { "label": "unpin", "detailKeys": ["channelId", "messageId"] },
-        "listPins": { "label": "list pins", "detailKeys": ["channelId"] },
-        "searchMessages": { "label": "search", "detailKeys": ["guildId", "content"] },
-        "memberInfo": { "label": "member", "detailKeys": ["guildId", "userId"] },
-        "roleInfo": { "label": "roles", "detailKeys": ["guildId"] },
-        "emojiList": { "label": "emoji list", "detailKeys": ["guildId"] },
-        "roleAdd": { "label": "role add", "detailKeys": ["guildId", "userId", "roleId"] },
-        "roleRemove": { "label": "role remove", "detailKeys": ["guildId", "userId", "roleId"] },
-        "channelInfo": { "label": "channel", "detailKeys": ["channelId"] },
-        "channelList": { "label": "channels", "detailKeys": ["guildId"] },
-        "voiceStatus": { "label": "voice", "detailKeys": ["guildId", "userId"] },
-        "eventList": { "label": "events", "detailKeys": ["guildId"] },
-        "eventCreate": { "label": "event create", "detailKeys": ["guildId", "name"] },
-        "timeout": { "label": "timeout", "detailKeys": ["guildId", "userId"] },
-        "kick": { "label": "kick", "detailKeys": ["guildId", "userId"] },
-        "ban": { "label": "ban", "detailKeys": ["guildId", "userId"] }
-      }
-    },
-    "slack": {
-      "icon": "messageSquare",
-      "title": "Slack",
-      "actions": {
-        "react": { "label": "react", "detailKeys": ["channelId", "messageId", "emoji"] },
-        "reactions": { "label": "reactions", "detailKeys": ["channelId", "messageId"] },
-        "sendMessage": { "label": "send", "detailKeys": ["to", "content"] },
-        "editMessage": { "label": "edit", "detailKeys": ["channelId", "messageId"] },
-        "deleteMessage": { "label": "delete", "detailKeys": ["channelId", "messageId"] },
-        "readMessages": { "label": "read messages", "detailKeys": ["channelId", "limit"] },
-        "pinMessage": { "label": "pin", "detailKeys": ["channelId", "messageId"] },
-        "unpinMessage": { "label": "unpin", "detailKeys": ["channelId", "messageId"] },
-        "listPins": { "label": "list pins", "detailKeys": ["channelId"] },
-        "memberInfo": { "label": "member", "detailKeys": ["userId"] },
-        "emojiList": { "label": "emoji list" }
       }
     }
   }

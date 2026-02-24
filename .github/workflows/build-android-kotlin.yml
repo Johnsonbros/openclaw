@@ -1,7 +1,7 @@
 name: Build Android APK (Kotlin)
 on:
   push:
-    paths: ['apps/android/**']
+    paths: ["apps/android/**"]
   workflow_dispatch:
 jobs:
   build:
@@ -11,7 +11,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
       - name: Build debug APK
         working-directory: apps/android
         run: ./gradlew assembleDebug

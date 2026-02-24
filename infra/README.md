@@ -31,6 +31,7 @@ infra/
 ### Mac Setup
 
 1. Start PostgreSQL container:
+
    ```bash
    docker run -d --name openclaw-postgres \
      -e POSTGRES_USER=zeke \
@@ -42,11 +43,13 @@ infra/
    ```
 
 2. Copy service plists to `~/Library/LaunchAgents/`:
+
    ```bash
    cp infra/launchd/*.plist ~/Library/LaunchAgents/
    ```
 
 3. Copy scripts to `~/.openclaw/scripts/`:
+
    ```bash
    mkdir -p ~/.openclaw/scripts
    cp infra/scripts/gateway-start.sh infra/scripts/db-sync.sh infra/scripts/health-check.sh ~/.openclaw/scripts/
@@ -63,12 +66,14 @@ infra/
 ### zeke Setup
 
 1. Install failover script (root-owned to prevent privilege escalation):
+
    ```bash
    scp infra/scripts/openclaw-failover.sh ubuntu@zeke:/tmp/
    ssh ubuntu@zeke "sudo mv /tmp/openclaw-failover.sh /usr/local/sbin/ && sudo chown root:root /usr/local/sbin/openclaw-failover.sh && sudo chmod 755 /usr/local/sbin/openclaw-failover.sh"
    ```
 
 2. Install systemd units:
+
    ```bash
    scp infra/systemd/openclaw-failover.* ubuntu@zeke:/tmp/
    ssh ubuntu@zeke "sudo mv /tmp/openclaw-failover.* /etc/systemd/system/ && sudo systemctl daemon-reload"
@@ -83,6 +88,7 @@ infra/
 ## Operations
 
 ### Health Check
+
 ```bash
 ~/.openclaw/scripts/health-check.sh
 ```
@@ -91,10 +97,10 @@ Verifies: gateway HTTP, launchd services, Docker, PostgreSQL, DB sync, Tailscale
 
 ### Viewing Logs
 
-| Log | Command |
-|-----|---------|
-| Gateway (Mac) | `tail -f ~/.openclaw/logs/gateway.log` |
-| DB Sync (Mac) | `tail -f ~/.openclaw/logs/db-sync.log` |
+| Log             | Command                                                    |
+| --------------- | ---------------------------------------------------------- |
+| Gateway (Mac)   | `tail -f ~/.openclaw/logs/gateway.log`                     |
+| DB Sync (Mac)   | `tail -f ~/.openclaw/logs/db-sync.log`                     |
 | Failover (zeke) | `ssh ubuntu@zeke "tail -f /var/log/openclaw-failover.log"` |
 
 ### Restarting Services

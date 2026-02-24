@@ -4,9 +4,9 @@ This folder links this project to your global aOa installation.
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `home.json` | Points to global aOa install location |
+| File            | Purpose                                     |
+| --------------- | ------------------------------------------- |
+| `home.json`     | Points to global aOa install location       |
 | `whitelist.txt` | Optional: extra URLs/repos for this project |
 
 ## What is aOa?

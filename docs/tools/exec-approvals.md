@@ -47,12 +47,12 @@ To allow the gateway to run commands on remote nodes without prompts:
 ```json5
 // ~/.openclaw/openclaw.json on the GATEWAY
 {
-  "tools": {
-    "exec": {
-      "security": "full",  // or "allowlist" with patterns
-      "ask": "off"
-    }
-  }
+  tools: {
+    exec: {
+      security: "full", // or "allowlist" with patterns
+      ask: "off",
+    },
+  },
 }
 ```
 

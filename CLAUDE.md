@@ -54,6 +54,7 @@ pnpm gateway:dev              # Gateway dev mode (skips channels)
 ### Commits
 
 Use the repo's commit script to keep staging scoped:
+
 ```bash
 scripts/committer "<msg>" <file...>
 ```
@@ -63,6 +64,7 @@ scripts/committer "<msg>" <file...>
 ### Monorepo Structure
 
 pnpm workspace with these areas:
+
 - **Root package** (`openclaw`) — main CLI + Gateway + agent runtime
 - **`ui/`** — Web UI (Control Panel, WebChat)
 - **`packages/`** — compatibility shims (`clawdbot`, `moltbot`)
@@ -73,23 +75,23 @@ pnpm workspace with these areas:
 
 ### Core Source (`src/`) Layout
 
-| Directory | Purpose |
-|-----------|---------|
-| `gateway/` | WebSocket control plane server (`:18789`), HTTP endpoints, config reload, channel health |
-| `agents/` | Pi embedded agent runtime, tool definitions, subagent spawning, model selection |
-| `channels/` | Channel plugin system — routing, allowlists, media, auth, actions |
-| `telegram/`, `discord/`, `slack/`, `signal/`, `imessage/`, `web/` | Built-in channel implementations |
-| `config/` | Zod-validated configuration system (`types.*.ts`, `zod-schema.*.ts`) |
-| `sessions/` | Session persistence, send policies, transcript events |
-| `providers/` | LLM provider integrations (Anthropic, OpenAI, Google, Copilot, etc.) |
-| `media/` | Media pipeline (images, audio, video) |
-| `browser/` | Chromium/Chrome browser control via CDP |
-| `infra/` | Binary management, TLS, device identity, Tailscale, update checks |
-| `plugins/` | Plugin loader, hook runner, registry |
-| `plugin-sdk/` | SDK for extension authors (exported as `openclaw/plugin-sdk`) |
-| `cli/` | CLI wiring, commands, progress spinners |
-| `security/` | SSRF guards, audit |
-| `logging/` | Structured subsystem logging |
+| Directory                                                         | Purpose                                                                                  |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `gateway/`                                                        | WebSocket control plane server (`:18789`), HTTP endpoints, config reload, channel health |
+| `agents/`                                                         | Pi embedded agent runtime, tool definitions, subagent spawning, model selection          |
+| `channels/`                                                       | Channel plugin system — routing, allowlists, media, auth, actions                        |
+| `telegram/`, `discord/`, `slack/`, `signal/`, `imessage/`, `web/` | Built-in channel implementations                                                         |
+| `config/`                                                         | Zod-validated configuration system (`types.*.ts`, `zod-schema.*.ts`)                     |
+| `sessions/`                                                       | Session persistence, send policies, transcript events                                    |
+| `providers/`                                                      | LLM provider integrations (Anthropic, OpenAI, Google, Copilot, etc.)                     |
+| `media/`                                                          | Media pipeline (images, audio, video)                                                    |
+| `browser/`                                                        | Chromium/Chrome browser control via CDP                                                  |
+| `infra/`                                                          | Binary management, TLS, device identity, Tailscale, update checks                        |
+| `plugins/`                                                        | Plugin loader, hook runner, registry                                                     |
+| `plugin-sdk/`                                                     | SDK for extension authors (exported as `openclaw/plugin-sdk`)                            |
+| `cli/`                                                            | CLI wiring, commands, progress spinners                                                  |
+| `security/`                                                       | SSRF guards, audit                                                                       |
+| `logging/`                                                        | Structured subsystem logging                                                             |
 
 ### Key Architectural Patterns
 
@@ -122,6 +124,7 @@ pnpm workspace with these areas:
 ## Channel Work
 
 When refactoring shared channel logic (routing, allowlists, pairing, command gating, onboarding), consider **all** built-in + extension channels:
+
 - Core: `src/telegram`, `src/discord`, `src/slack`, `src/signal`, `src/imessage`, `src/web`, `src/channels`, `src/routing`
 - Extensions: `extensions/*` (msteams, matrix, zalo, zalouser, voice-call, etc.)
 
@@ -130,6 +133,7 @@ When adding channels/extensions/apps, update `.github/labeler.yml` and create ma
 ## Version Locations
 
 Version must be updated in all of these (except `appcast.xml`):
+
 - `package.json` (CLI)
 - `apps/android/app/build.gradle.kts` (versionName/versionCode)
 - `apps/ios/Sources/Info.plist` + `apps/ios/Tests/Info.plist`

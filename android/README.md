@@ -23,12 +23,12 @@ This app ships **hardcoded** to connect to a specific OpenClaw gateway. To use w
 
 ## Supported Devices
 
-| Device | Type | Status |
-|--------|------|--------|
-| Limitless Pendant | BLE audio wearable | ✅ Full support |
-| Omi DevKit2 | BLE audio wearable | ✅ Full support |
-| MimiClaw ESP32 | WiFi/BLE microcontroller | 🔜 Coming soon |
-| Phone Microphone | Built-in | ✅ Fallback mode |
+| Device            | Type                     | Status           |
+| ----------------- | ------------------------ | ---------------- |
+| Limitless Pendant | BLE audio wearable       | ✅ Full support  |
+| Omi DevKit2       | BLE audio wearable       | ✅ Full support  |
+| MimiClaw ESP32    | WiFi/BLE microcontroller | 🔜 Coming soon   |
+| Phone Microphone  | Built-in                 | ✅ Fallback mode |
 
 ## Architecture
 

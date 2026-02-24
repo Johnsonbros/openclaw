@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   push:
     paths:
-      - 'android/**'
+      - "android/**"
   workflow_dispatch:
 
 jobs:
@@ -14,19 +14,19 @@ jobs:
 
       - uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: "temurin"
+          java-version: "17"
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.4'
-          channel: 'stable'
+          flutter-version: "3.27.4"
+          channel: "stable"
           cache: true
 
       - name: Create Flutter project scaffold
         run: |
           flutter create --org com.openclaw --project-name zeke_ai --platforms android /tmp/build
-          
+
       - name: Overlay our source code
         run: |
           # Copy our Dart source (replace scaffold's lib/ and remove test/)
@@ -34,7 +34,7 @@ jobs:
           rm -rf /tmp/build/test
           cp -r android/lib /tmp/build/
           cp android/pubspec.yaml /tmp/build/
-          
+
           # Add BLE/audio/location permissions to scaffold's manifest
           sed -i '/<\/manifest>/i \
               <uses-permission android:name="android.permission.BLUETOOTH" \/>\
@@ -48,17 +48,17 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" \/>\
               <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" \/>' \
             /tmp/build/android/app/src/main/AndroidManifest.xml
-          
+
           # Set app label
           sed -i 's/android:label="[^"]*"/android:label="ZEKE AI"/' /tmp/build/android/app/src/main/AndroidManifest.xml
-          
+
           # Bump minSdk to 21 in scaffold's build.gradle (BLE requires it)
           sed -i 's/minSdk =.*/minSdk = 21/' /tmp/build/android/app/build.gradle
           sed -i 's/minSdkVersion.*/minSdkVersion 21/' /tmp/build/android/app/build.gradle
-          
+
           # Ensure AndroidX + no Jetifier
           echo "android.enableJetifier=false" >> /tmp/build/android/gradle.properties
-          
+
           echo "Overlay complete"
 
       - name: Install dependencies

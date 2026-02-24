@@ -11,18 +11,18 @@ allowed-tools: Bash
 
 ## Quick Reference
 
-| Command | Use For | Speed |
-|---------|---------|-------|
-| `aoa grep <term>` | Symbol search (O(1) indexed) | <1ms |
-| `aoa grep "a b c"` | Multi-term OR search, ranked | <5ms |
-| `aoa grep -a t1,t2` | Multi-term AND (all required) | <5ms |
-| `aoa egrep "regex"` | Regex pattern (working set) | ~20ms |
-| `aoa find "*.py"` | File discovery by pattern | <10ms |
-| `aoa locate name` | Fast filename search | <5ms |
-| `aoa tree [dir]` | Directory structure | <50ms |
-| `aoa changes [time]` | Recently modified files | <10ms |
-| `aoa hot` | Frequently accessed files | <10ms |
-| `aoa intent recent` | See current work patterns | <50ms |
+| Command              | Use For                       | Speed |
+| -------------------- | ----------------------------- | ----- |
+| `aoa grep <term>`    | Symbol search (O(1) indexed)  | <1ms  |
+| `aoa grep "a b c"`   | Multi-term OR search, ranked  | <5ms  |
+| `aoa grep -a t1,t2`  | Multi-term AND (all required) | <5ms  |
+| `aoa egrep "regex"`  | Regex pattern (working set)   | ~20ms |
+| `aoa find "*.py"`    | File discovery by pattern     | <10ms |
+| `aoa locate name`    | Fast filename search          | <5ms  |
+| `aoa tree [dir]`     | Directory structure           | <50ms |
+| `aoa changes [time]` | Recently modified files       | <10ms |
+| `aoa hot`            | Frequently accessed files     | <10ms |
+| `aoa intent recent`  | See current work patterns     | <50ms |
 
 ## Commands
 
@@ -108,15 +108,16 @@ aoa intent tags         # All semantic tags
 
 ## Efficiency
 
-| Approach | Tool Calls | Tokens | Time |
-|----------|------------|--------|------|
-| Grep + Read loops | 7 | 8,500 | 2.6s |
-| aoa grep | 1-2 | 1,150 | 54ms |
-| **Savings** | **71%** | **86%** | **98%** |
+| Approach          | Tool Calls | Tokens  | Time    |
+| ----------------- | ---------- | ------- | ------- |
+| Grep + Read loops | 7          | 8,500   | 2.6s    |
+| aoa grep          | 1-2        | 1,150   | 54ms    |
+| **Savings**       | **71%**    | **86%** | **98%** |
 
 ## Tips
 
 1. **Read specific lines** - aOa returns `file:line`, so read just those lines:
+
    ```bash
    Read(file_path="src/auth.py", offset=45, limit=10)
    ```

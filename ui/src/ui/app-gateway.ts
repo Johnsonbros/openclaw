@@ -29,6 +29,7 @@ import { loadSessions } from "./controllers/sessions.ts";
 import type { GatewayEventFrame, GatewayHelloOk } from "./gateway.ts";
 import { GatewayBrowserClient } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
+import { BrowserNodeClient } from "./node-client.ts";
 import type { UiSettings } from "./storage.ts";
 import type {
   AgentsListResult,
@@ -65,6 +66,7 @@ type GatewayHost = {
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;
   updateAvailable: UpdateAvailable | null;
+  nodeClient: BrowserNodeClient | null;
 };
 
 type SessionDefaultsSnapshot = {
@@ -159,12 +161,14 @@ export function connectGateway(host: GatewayHost) {
       void loadNodes(host as unknown as OpenClawApp, { quiet: true });
       void loadDevices(host as unknown as OpenClawApp, { quiet: true });
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
+      startNodeClient(host);
     },
     onClose: ({ code, reason }) => {
       if (host.client !== client) {
         return;
       }
       host.connected = false;
+      stopNodeClient(host);
       // Code 1012 = Service Restart (expected during config saves, don't show as error)
       if (code !== 1012) {
         host.lastError = `disconnected (${code}): ${reason || "no reason"}`;
@@ -308,4 +312,28 @@ export function applySnapshot(host: GatewayHost, hello: GatewayHelloOk) {
     applySessionDefaults(host, snapshot.sessionDefaults);
   }
   host.updateAvailable = snapshot?.updateAvailable ?? null;
+}
+
+function startNodeClient(host: GatewayHost) {
+  stopNodeClient(host);
+  const nc = new BrowserNodeClient({
+    url: host.settings.gatewayUrl,
+    token: host.settings.token.trim() ? host.settings.token : undefined,
+    password: host.password.trim() ? host.password : undefined,
+    onConnected: () => {
+      void loadNodes(host as unknown as OpenClawApp, { quiet: true });
+    },
+    onDisconnected: () => {
+      void loadNodes(host as unknown as OpenClawApp, { quiet: true });
+    },
+  });
+  host.nodeClient = nc;
+  nc.start();
+}
+
+function stopNodeClient(host: GatewayHost) {
+  if (host.nodeClient) {
+    host.nodeClient.stop();
+    host.nodeClient = null;
+  }
 }

@@ -8,6 +8,7 @@ export const GATEWAY_CLIENT_IDS = {
   IOS_APP: "openclaw-ios",
   ANDROID_APP: "openclaw-android",
   NODE_HOST: "node-host",
+  WEBCHAT_NODE: "webchat-node",
   TEST: "test",
   FINGERPRINT: "fingerprint",
   PROBE: "openclaw-probe",

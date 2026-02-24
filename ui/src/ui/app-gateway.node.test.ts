@@ -43,6 +43,14 @@ vi.mock("./gateway.ts", () => {
   return { GatewayBrowserClient };
 });
 
+vi.mock("./node-client.ts", () => {
+  class BrowserNodeClient {
+    readonly start = vi.fn();
+    readonly stop = vi.fn();
+  }
+  return { BrowserNodeClient };
+});
+
 function createHost() {
   return {
     settings: {
@@ -81,6 +89,7 @@ function createHost() {
     execApprovalQueue: [],
     execApprovalError: null,
     updateAvailable: null,
+    nodeClient: null,
   } as unknown as Parameters<typeof connectGateway>[0];
 }
 

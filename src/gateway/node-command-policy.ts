@@ -90,6 +90,7 @@ const PLATFORM_DEFAULTS: Record<string, string[]> = {
   ],
   linux: [...SYSTEM_COMMANDS],
   windows: [...SYSTEM_COMMANDS],
+  web: [...CAMERA_COMMANDS],
   unknown: [...CANVAS_COMMANDS, ...CAMERA_COMMANDS, ...LOCATION_COMMANDS, ...SYSTEM_COMMANDS],
 };
 
@@ -106,6 +107,9 @@ function normalizePlatformId(platform?: string, deviceFamily?: string): string {
   }
   if (raw.startsWith("darwin")) {
     return "macos";
+  }
+  if (raw === "web") {
+    return "web";
   }
   if (raw.startsWith("win")) {
     return "windows";

@@ -18,6 +18,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
+import android.os.Build
 import kotlinx.coroutines.launch
 
 class NodeForegroundService : Service() {
@@ -150,7 +151,12 @@ class NodeForegroundService : Service() {
       } else {
         ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
       }
-    startForeground(NOTIFICATION_ID, notification, types)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      startForeground(NOTIFICATION_ID, notification, types)
+    } else {
+      @Suppress("DEPRECATION")
+      startForeground(NOTIFICATION_ID, notification)
+    }
     didStartForeground = true
   }
 

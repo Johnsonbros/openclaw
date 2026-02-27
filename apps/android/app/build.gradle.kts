@@ -18,7 +18,7 @@ android {
 
   defaultConfig {
     applicationId = "ai.openclaw.android"
-    minSdk = 31
+    minSdk = 26
     targetSdk = 36
     versionCode = 202602270
     versionName = "2026.2.27"

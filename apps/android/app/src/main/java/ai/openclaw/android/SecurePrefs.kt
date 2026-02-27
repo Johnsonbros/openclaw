@@ -58,11 +58,11 @@ class SecurePrefs(context: Context) {
   val preventSleep: StateFlow<Boolean> = _preventSleep
 
   private val _manualEnabled =
-    MutableStateFlow(plainPrefs.getBoolean("gateway.manual.enabled", false))
+    MutableStateFlow(plainPrefs.getBoolean("gateway.manual.enabled", true))
   val manualEnabled: StateFlow<Boolean> = _manualEnabled
 
   private val _manualHost =
-    MutableStateFlow(plainPrefs.getString("gateway.manual.host", "") ?: "")
+    MutableStateFlow(plainPrefs.getString("gateway.manual.host", "nathaniels-macbook-pro.tail5b81a2.ts.net") ?: "nathaniels-macbook-pro.tail5b81a2.ts.net")
   val manualHost: StateFlow<String> = _manualHost
 
   private val _manualPort =
@@ -73,7 +73,7 @@ class SecurePrefs(context: Context) {
     MutableStateFlow(plainPrefs.getBoolean("gateway.manual.tls", true))
   val manualTls: StateFlow<Boolean> = _manualTls
 
-  private val _gatewayToken = MutableStateFlow("")
+  private val _gatewayToken = MutableStateFlow(plainPrefs.getString("gateway.manual.token", "493fb5919a16b885fe34bcded2b5e5df4f5c3f2166c361d9") ?: "493fb5919a16b885fe34bcded2b5e5df4f5c3f2166c361d9")
   val gatewayToken: StateFlow<String> = _gatewayToken
 
   private val _onboardingCompleted =

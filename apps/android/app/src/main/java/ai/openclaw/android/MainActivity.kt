@@ -1,24 +1,13 @@
 package ai.openclaw.android
 
-import android.Manifest
-import android.content.pm.ApplicationInfo
-import android.app.ForegroundServiceStartNotAllowedException
 import android.os.Bundle
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.util.Log
 import android.view.WindowManager
-import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.core.view.WindowCompat
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import androidx.core.content.ContextCompat
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -30,17 +19,10 @@ class MainActivity : ComponentActivity() {
   private val viewModel: MainViewModel by viewModels()
   private lateinit var permissionRequester: PermissionRequester
   private lateinit var screenCaptureRequester: ScreenCaptureRequester
-  private val foregroundServiceRetryHandler = Handler(Looper.getMainLooper())
-  private var foregroundServiceRetryCount = 0
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    val isDebuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-    WebView.setWebContentsDebuggingEnabled(isDebuggable)
-    applyImmersiveMode()
-    requestDiscoveryPermissionsIfNeeded()
-    requestNotificationPermissionIfNeeded()
-    startNodeForegroundServiceSafely()
+    WindowCompat.setDecorFitsSystemWindows(window, false)
     permissionRequester = PermissionRequester(this)
     screenCaptureRequester = ScreenCaptureRequester(this)
     viewModel.camera.attachLifecycleOwner(this)
@@ -48,9 +30,6 @@ class MainActivity : ComponentActivity() {
     viewModel.sms.attachPermissionRequester(permissionRequester)
     viewModel.screenRecorder.attachScreenCaptureRequester(screenCaptureRequester)
     viewModel.screenRecorder.attachPermissionRequester(permissionRequester)
-
-    // Auto-connect to last paired BLE pendant
-    viewModel.pendant.autoConnectLastPaired()
 
     lifecycleScope.launch {
       repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -71,109 +50,18 @@ class MainActivity : ComponentActivity() {
         }
       }
     }
-  }
 
-  override fun onResume() {
-    super.onResume()
-    applyImmersiveMode()
-  }
-
-  override fun onWindowFocusChanged(hasFocus: Boolean) {
-    super.onWindowFocusChanged(hasFocus)
-    if (hasFocus) {
-      applyImmersiveMode()
-    }
+    // Keep startup path lean: start foreground service after first frame.
+    window.decorView.post { NodeForegroundService.start(this) }
   }
 
   override fun onStart() {
     super.onStart()
-    // Retry startup when returning to foreground in case the OS rejected a prior attempt.
-    if (!NodeForegroundService.isRunning) {
-      startNodeForegroundServiceSafely()
-    }
     viewModel.setForeground(true)
   }
 
   override fun onStop() {
     viewModel.setForeground(false)
     super.onStop()
-  }
-
-  override fun onDestroy() {
-    foregroundServiceRetryHandler.removeCallbacksAndMessages(null)
-    super.onDestroy()
-  }
-
-  private fun startNodeForegroundServiceSafely() {
-    try {
-      NodeForegroundService.start(this)
-      foregroundServiceRetryCount = 0
-    } catch (e: ForegroundServiceStartNotAllowedException) {
-      Log.w(TAG, "Foreground service start blocked by OS policy", e)
-      scheduleForegroundServiceRetry()
-    } catch (e: IllegalStateException) {
-      Log.w(TAG, "Foreground service start failed due to app state", e)
-      scheduleForegroundServiceRetry()
-    } catch (e: RuntimeException) {
-      // Defensive catch: keep app UI available even if OEM builds throw an unexpected runtime error.
-      Log.e(TAG, "Foreground service start failed unexpectedly", e)
-    }
-  }
-
-  private fun scheduleForegroundServiceRetry() {
-    if (foregroundServiceRetryCount >= MAX_FOREGROUND_SERVICE_RETRIES) return
-    foregroundServiceRetryCount += 1
-    foregroundServiceRetryHandler.postDelayed(
-      { startNodeForegroundServiceSafely() },
-      FOREGROUND_SERVICE_RETRY_DELAY_MS,
-    )
-  }
-
-  private fun applyImmersiveMode() {
-    WindowCompat.setDecorFitsSystemWindows(window, false)
-    val controller = WindowInsetsControllerCompat(window, window.decorView)
-    controller.systemBarsBehavior =
-      WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-    controller.hide(WindowInsetsCompat.Type.systemBars())
-  }
-
-  private fun requestDiscoveryPermissionsIfNeeded() {
-    if (Build.VERSION.SDK_INT >= 33) {
-      val ok =
-        ContextCompat.checkSelfPermission(
-          this,
-          Manifest.permission.NEARBY_WIFI_DEVICES,
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-      if (!ok) {
-        requestPermissions(arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES), 100)
-      }
-    } else {
-      val ok =
-        ContextCompat.checkSelfPermission(
-          this,
-          Manifest.permission.ACCESS_FINE_LOCATION,
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-      if (!ok) {
-        requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 101)
-      }
-    }
-  }
-
-  private fun requestNotificationPermissionIfNeeded() {
-    if (Build.VERSION.SDK_INT < 33) return
-    val ok =
-      ContextCompat.checkSelfPermission(
-        this,
-        Manifest.permission.POST_NOTIFICATIONS,
-      ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-    if (!ok) {
-      requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 102)
-    }
-  }
-
-  companion object {
-    private const val TAG = "MainActivity"
-    private const val MAX_FOREGROUND_SERVICE_RETRIES = 3
-    private const val FOREGROUND_SERVICE_RETRY_DELAY_MS = 1_000L
   }
 }

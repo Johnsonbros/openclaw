@@ -28,6 +28,20 @@ android {
     }
   }
 
+  flavorDimensions += "apiLevel"
+  productFlavors {
+    create("compat") {
+      dimension = "apiLevel"
+      minSdk = 26
+      versionNameSuffix = "-compat"
+    }
+    create("modern") {
+      dimension = "apiLevel"
+      minSdk = 31
+      versionNameSuffix = "-modern"
+    }
+  }
+
   buildTypes {
     release {
       isMinifyEnabled = true
@@ -83,7 +97,8 @@ androidComponents {
         val versionName = output.versionName.orNull ?: "0"
         val buildType = variant.buildType
 
-        val outputFileName = "openclaw-${versionName}-${buildType}.apk"
+        val flavor = variant.flavorName ?: "default"
+        val outputFileName = "openclaw-${versionName}-${flavor}-${buildType}.apk"
         output.outputFileName = outputFileName
       }
   }

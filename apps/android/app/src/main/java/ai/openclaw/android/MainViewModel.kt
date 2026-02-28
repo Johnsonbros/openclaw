@@ -67,6 +67,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val pendantEnabled: StateFlow<Boolean> = runtime.pendantEnabled
   val pendantAudioActive: StateFlow<Boolean> = runtime.pendantAudioActive
 
+  val talkEnabled: StateFlow<Boolean> = runtime.talkEnabled
+  val talkStatusText: StateFlow<String> = runtime.talkStatusText
+  val talkIsListening: StateFlow<Boolean> = runtime.talkIsListening
+  val talkIsSpeaking: StateFlow<Boolean> = runtime.talkIsSpeaking
+  val talkLastAssistantText: StateFlow<String?> = runtime.talkLastAssistantText
+
   val chatSessionKey: StateFlow<String> = runtime.chatSessionKey
   val chatSessionId: StateFlow<String?> = runtime.chatSessionId
   val chatMessages = runtime.chatMessages
@@ -136,6 +142,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setMicEnabled(enabled: Boolean) {
     runtime.setMicEnabled(enabled)
+  }
+
+  fun setTalkEnabled(value: Boolean) {
+    runtime.setTalkEnabled(value)
   }
 
   fun setPendantEnabled(value: Boolean) {

@@ -39,11 +39,13 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -94,6 +96,16 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
   val micConversation by viewModel.micConversation.collectAsState()
   val micInputLevel by viewModel.micInputLevel.collectAsState()
   val micIsSending by viewModel.micIsSending.collectAsState()
+
+  // Talk mode (interactive voice with TTS)
+  val talkEnabled by viewModel.talkEnabled.collectAsState()
+  val talkStatusText by viewModel.talkStatusText.collectAsState()
+  val talkIsListening by viewModel.talkIsListening.collectAsState()
+  val talkIsSpeaking by viewModel.talkIsSpeaking.collectAsState()
+  val talkLastAssistantText by viewModel.talkLastAssistantText.collectAsState()
+
+  // false = simple mic mode, true = interactive talk mode
+  var interactiveTalkMode by remember { mutableStateOf(false) }
 
   val hasStreamingAssistant = micConversation.any { it.role == VoiceConversationRole.Assistant && it.isStreaming }
   val showThinkingBubble = micIsSending && !hasStreamingAssistant
@@ -165,6 +177,39 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
       }
     }
 
+    // Mode toggle: Simple mic vs Interactive talk
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      val modes = listOf("Simple mic" to false, "Interactive talk" to true)
+      modes.forEach { (label, isInteractive) ->
+        val selected = interactiveTalkMode == isInteractive
+        Surface(
+          modifier = Modifier
+            .weight(1f)
+            .clickable {
+              if (interactiveTalkMode != isInteractive) {
+                // Disable the current mode before switching
+                if (interactiveTalkMode) viewModel.setTalkEnabled(false) else viewModel.setMicEnabled(false)
+                interactiveTalkMode = isInteractive
+              }
+            },
+          shape = RoundedCornerShape(12.dp),
+          color = if (selected) mobileAccentSoft else mobileSurface,
+          border = BorderStroke(1.dp, if (selected) mobileAccent.copy(alpha = 0.3f) else mobileBorder),
+        ) {
+          Text(
+            label,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            style = mobileCallout.copy(fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal),
+            color = if (selected) mobileAccent else mobileTextSecondary,
+            textAlign = TextAlign.Center,
+          )
+        }
+      }
+    }
+
     LazyColumn(
       state = listState,
       modifier = Modifier.fillMaxWidth().weight(1f),
@@ -208,111 +253,215 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        Surface(
-          shape = RoundedCornerShape(999.dp),
-          color = mobileSurface,
-          border = BorderStroke(1.dp, mobileBorder),
-        ) {
-          val queueCount = micQueuedMessages.size
-          val stateText =
-            when {
-              queueCount > 0 -> "$queueCount queued"
-              micIsSending -> "Sending"
-              micEnabled -> "Listening"
-              else -> "Mic off"
-            }
-          Text(
-            "$gatewayStatus · $stateText",
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-            style = mobileCaption1,
-            color = mobileTextSecondary,
-          )
-        }
-
-        if (!micLiveTranscript.isNullOrBlank()) {
+        if (!interactiveTalkMode) {
+          // ── Simple mic mode ──
           Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            color = mobileAccentSoft,
-            border = BorderStroke(1.dp, mobileAccent.copy(alpha = 0.2f)),
+            shape = RoundedCornerShape(999.dp),
+            color = mobileSurface,
+            border = BorderStroke(1.dp, mobileBorder),
           ) {
+            val queueCount = micQueuedMessages.size
+            val stateText =
+              when {
+                queueCount > 0 -> "$queueCount queued"
+                micIsSending -> "Sending"
+                micEnabled -> "Listening"
+                else -> "Mic off"
+              }
             Text(
-              micLiveTranscript!!.trim(),
-              modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-              style = mobileCallout,
-              color = mobileText,
+              "$gatewayStatus · $stateText",
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+              style = mobileCaption1,
+              color = mobileTextSecondary,
             )
           }
-        }
 
-        MicWaveform(level = micInputLevel, active = micEnabled)
+          if (!micLiveTranscript.isNullOrBlank()) {
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(14.dp),
+              color = mobileAccentSoft,
+              border = BorderStroke(1.dp, mobileAccent.copy(alpha = 0.2f)),
+            ) {
+              Text(
+                micLiveTranscript!!.trim(),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                style = mobileCallout,
+                color = mobileText,
+              )
+            }
+          }
 
-        Button(
-          onClick = {
-            if (micEnabled) {
-              viewModel.setMicEnabled(false)
-              return@Button
+          MicWaveform(level = micInputLevel, active = micEnabled)
+
+          Button(
+            onClick = {
+              if (micEnabled) {
+                viewModel.setMicEnabled(false)
+                return@Button
+              }
+              if (hasMicPermission) {
+                viewModel.setMicEnabled(true)
+              } else {
+                pendingMicEnable = true
+                requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+              }
+            },
+            shape = CircleShape,
+            contentPadding = PaddingValues(0.dp),
+            modifier = Modifier.size(86.dp),
+            colors =
+              ButtonDefaults.buttonColors(
+                containerColor = if (micEnabled) mobileDanger else mobileAccent,
+                contentColor = Color.White,
+              ),
+          ) {
+            Icon(
+              imageVector = if (micEnabled) Icons.Default.MicOff else Icons.Default.Mic,
+              contentDescription = if (micEnabled) "Turn microphone off" else "Turn microphone on",
+              modifier = Modifier.size(30.dp),
+            )
+          }
+
+          Text(
+            if (micEnabled) "Tap to stop" else "Tap to speak",
+            style = mobileCallout,
+            color = mobileTextSecondary,
+          )
+
+          if (!hasMicPermission) {
+            val showRationale =
+              if (activity == null) {
+                false
+              } else {
+                ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.RECORD_AUDIO)
+              }
+            Text(
+              if (showRationale) {
+                "Microphone permission is required for voice mode."
+              } else {
+                "Microphone blocked. Open app settings to enable it."
+              },
+              style = mobileCaption1,
+              color = mobileWarning,
+              textAlign = TextAlign.Center,
+            )
+            Button(
+              onClick = { openAppSettings(context) },
+              shape = RoundedCornerShape(12.dp),
+              colors = ButtonDefaults.buttonColors(containerColor = mobileSurfaceStrong, contentColor = mobileText),
+            ) {
+              Text("Open settings", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
             }
-            if (hasMicPermission) {
-              viewModel.setMicEnabled(true)
-            } else {
-              pendingMicEnable = true
-              requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+          }
+
+          Text(
+            micStatusText,
+            style = mobileCaption1,
+            color = mobileTextTertiary,
+          )
+        } else {
+          // ── Interactive talk mode (TalkModeManager with ElevenLabs TTS) ──
+          Surface(
+            shape = RoundedCornerShape(999.dp),
+            color = mobileSurface,
+            border = BorderStroke(1.dp, mobileBorder),
+          ) {
+            val stateText = when {
+              talkIsSpeaking -> "Speaking"
+              talkIsListening -> "Listening"
+              talkEnabled -> talkStatusText
+              else -> "Talk off"
             }
-          },
-          shape = CircleShape,
-          contentPadding = PaddingValues(0.dp),
-          modifier = Modifier.size(86.dp),
-          colors =
-            ButtonDefaults.buttonColors(
-              containerColor = if (micEnabled) mobileDanger else mobileAccent,
+            Text(
+              "$gatewayStatus · $stateText",
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+              style = mobileCaption1,
+              color = mobileTextSecondary,
+            )
+          }
+
+          if (!talkLastAssistantText.isNullOrBlank()) {
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(14.dp),
+              color = if (talkIsSpeaking) mobileAccentSoft else mobileSurface,
+              border = BorderStroke(
+                1.dp,
+                if (talkIsSpeaking) mobileAccent.copy(alpha = 0.3f) else mobileBorder,
+              ),
+            ) {
+              Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                if (talkIsSpeaking) {
+                  Text("Speaking", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileAccent)
+                }
+                Text(
+                  talkLastAssistantText!!.take(300),
+                  style = mobileCallout,
+                  color = mobileText,
+                )
+              }
+            }
+          }
+
+          Button(
+            onClick = {
+              if (talkEnabled) {
+                viewModel.setTalkEnabled(false)
+              } else {
+                if (hasMicPermission) {
+                  viewModel.setTalkEnabled(true)
+                } else {
+                  pendingMicEnable = true
+                  requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+                }
+              }
+            },
+            shape = CircleShape,
+            contentPadding = PaddingValues(0.dp),
+            modifier = Modifier.size(86.dp),
+            colors = ButtonDefaults.buttonColors(
+              containerColor = when {
+                talkIsSpeaking -> Color(0xFF6366F1) // indigo for speaking
+                talkEnabled -> mobileDanger
+                else -> mobileAccent
+              },
               contentColor = Color.White,
             ),
-        ) {
-          Icon(
-            imageVector = if (micEnabled) Icons.Default.MicOff else Icons.Default.Mic,
-            contentDescription = if (micEnabled) "Turn microphone off" else "Turn microphone on",
-            modifier = Modifier.size(30.dp),
-          )
-        }
-
-        Text(
-          if (micEnabled) "Tap to stop" else "Tap to speak",
-          style = mobileCallout,
-          color = mobileTextSecondary,
-        )
-
-        if (!hasMicPermission) {
-          val showRationale =
-            if (activity == null) {
-              false
-            } else {
-              ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.RECORD_AUDIO)
-            }
-          Text(
-            if (showRationale) {
-              "Microphone permission is required for voice mode."
-            } else {
-              "Microphone blocked. Open app settings to enable it."
-            },
-            style = mobileCaption1,
-            color = mobileWarning,
-            textAlign = TextAlign.Center,
-          )
-          Button(
-            onClick = { openAppSettings(context) },
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = mobileSurfaceStrong, contentColor = mobileText),
           ) {
-            Text("Open settings", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
+            Icon(
+              imageVector = if (talkEnabled) Icons.Default.RecordVoiceOver else Icons.Default.Mic,
+              contentDescription = if (talkEnabled) "Stop interactive talk" else "Start interactive talk",
+              modifier = Modifier.size(30.dp),
+            )
           }
-        }
 
-        Text(
-          micStatusText,
-          style = mobileCaption1,
-          color = mobileTextTertiary,
-        )
+          Text(
+            when {
+              talkIsSpeaking -> "Speaking — tap to interrupt"
+              talkIsListening -> "Listening — speak now"
+              talkEnabled -> "Processing…"
+              else -> "Tap to start talk mode"
+            },
+            style = mobileCallout,
+            color = mobileTextSecondary,
+          )
+
+          if (!hasMicPermission) {
+            Text(
+              "Microphone permission required for interactive talk.",
+              style = mobileCaption1,
+              color = mobileWarning,
+              textAlign = TextAlign.Center,
+            )
+          }
+
+          Text(
+            talkStatusText,
+            style = mobileCaption1,
+            color = mobileTextTertiary,
+          )
+        }
       }
     }
   }

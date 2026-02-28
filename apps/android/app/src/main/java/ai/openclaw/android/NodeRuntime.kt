@@ -22,6 +22,7 @@ import ai.openclaw.android.protocol.OpenClawCanvasA2UIAction
 import ai.openclaw.android.ble.PendantAudioBridge
 import ai.openclaw.android.ble.PendantBleManager
 import ai.openclaw.android.voice.MicCaptureManager
+import ai.openclaw.android.voice.TalkModeManager
 import ai.openclaw.android.voice.VoiceConversationEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -307,6 +308,31 @@ class NodeRuntime(context: Context) {
     )
   }
 
+  private val talkMode: TalkModeManager by lazy {
+    TalkModeManager(
+      context = appContext,
+      scope = scope,
+      session = operatorSession,
+      supportsChatSubscribe = false,
+      isConnected = { operatorConnected },
+    )
+  }
+
+  val talkEnabled: StateFlow<Boolean>
+    get() = talkMode.isEnabled
+  val talkStatusText: StateFlow<String>
+    get() = talkMode.statusText
+  val talkIsListening: StateFlow<Boolean>
+    get() = talkMode.isListening
+  val talkIsSpeaking: StateFlow<Boolean>
+    get() = talkMode.isSpeaking
+  val talkLastAssistantText: StateFlow<String?>
+    get() = talkMode.lastAssistantText
+
+  fun setTalkEnabled(value: Boolean) {
+    talkMode.setEnabled(value)
+  }
+
   val bleManager: PendantBleManager by lazy {
     PendantBleManager(context = appContext, scope = scope)
   }
@@ -481,10 +507,6 @@ class NodeRuntime(context: Context) {
   val pendingRunCount: StateFlow<Int> = chat.pendingRunCount
 
   init {
-    if (prefs.voiceWakeMode.value != VoiceWakeMode.Off) {
-      prefs.setVoiceWakeMode(VoiceWakeMode.Off)
-    }
-
     scope.launch {
       prefs.loadGatewayToken()
     }
@@ -561,6 +583,19 @@ class NodeRuntime(context: Context) {
               _pendantAudioActive.value = false
             }
           }
+        }
+      }
+    }
+
+    // Auto-connect pendant on startup if enabled
+    scope.launch {
+      if (pendantEnabled.value) {
+        bleManager.autoConnectLastPaired()
+      }
+      // Also observe future changes to pendantEnabled
+      pendantEnabled.collect { enabled ->
+        if (enabled && bleManager.connectionState.value == PendantBleManager.ConnectionState.DISCONNECTED) {
+          bleManager.autoConnectLastPaired()
         }
       }
     }
@@ -848,6 +883,7 @@ class NodeRuntime(context: Context) {
   private fun handleGatewayEvent(event: String, payloadJson: String?) {
     micCapture.handleGatewayEvent(event, payloadJson)
     chat.handleGatewayEvent(event, payloadJson)
+    talkMode.handleGatewayEvent(event, payloadJson)
   }
 
   private fun parseChatSendRunId(response: String): String? {

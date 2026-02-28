@@ -20,6 +20,7 @@ import android.os.ParcelUuid
 import android.util.Log
 import androidx.core.content.ContextCompat
 import java.util.UUID
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -29,6 +30,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * BLE manager for Omi DevKit2 and Limitless pendants.
@@ -85,6 +89,16 @@ class PendantBleManager(
   private val _audioData = MutableSharedFlow<ByteArray>(extraBufferCapacity = 64)
   val audioData: SharedFlow<ByteArray> = _audioData
 
+  enum class PendantCodec(val id: Int) {
+    PCM8(0), PCM16(1), OPUS(10), LC3(20), UNKNOWN(-1);
+    companion object {
+      fun fromByte(value: Int): PendantCodec = entries.firstOrNull { it.id == value } ?: UNKNOWN
+    }
+  }
+
+  private val _codec = MutableStateFlow(PendantCodec.UNKNOWN)
+  val codec: StateFlow<PendantCodec> = _codec
+
   private var gatt: BluetoothGatt? = null
   private var scanJob: Job? = null
   private var reconnectJob: Job? = null
@@ -92,6 +106,11 @@ class PendantBleManager(
   private var shouldAutoReconnect = false
   private var lastConnectedAddress: String? = null
   private var connectedType: PendantType = PendantType.UNKNOWN
+
+  // GATT write/descriptor completion signaling (serialized via gattWriteMutex)
+  private val gattWriteMutex = Mutex()
+  @Volatile private var pendingWrite: CompletableDeferred<Boolean>? = null
+  @Volatile private var pendingDescriptorWrite: CompletableDeferred<Boolean>? = null
 
   private val prefs by lazy {
     context.getSharedPreferences("pendant_ble", Context.MODE_PRIVATE)
@@ -312,6 +331,49 @@ class PendantBleManager(
     ) {
       handleNotification(characteristic.uuid, value)
     }
+
+    override fun onDescriptorWrite(
+      gatt: BluetoothGatt,
+      descriptor: BluetoothGattDescriptor,
+      status: Int,
+    ) {
+      val ok = status == BluetoothGatt.GATT_SUCCESS
+      if (!ok) Log.w(TAG, "Descriptor write failed status=$status")
+      pendingDescriptorWrite?.complete(ok)
+      pendingDescriptorWrite = null
+    }
+
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun onCharacteristicWrite(
+      gatt: BluetoothGatt,
+      characteristic: BluetoothGattCharacteristic,
+      status: Int,
+    ) {
+      val ok = status == BluetoothGatt.GATT_SUCCESS
+      if (!ok) Log.w(TAG, "Characteristic write failed status=$status uuid=${characteristic.uuid}")
+      pendingWrite?.complete(ok)
+      pendingWrite = null
+    }
+
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun onCharacteristicRead(
+      gatt: BluetoothGatt,
+      characteristic: BluetoothGattCharacteristic,
+      status: Int,
+    ) {
+      if (status != BluetoothGatt.GATT_SUCCESS) {
+        Log.w(TAG, "Characteristic read failed status=$status")
+        return
+      }
+      if (characteristic.uuid == OMI_CODEC) {
+        val value = characteristic.value
+        if (value != null && value.isNotEmpty()) {
+          val codec = PendantCodec.fromByte(value[0].toInt() and 0xFF)
+          _codec.value = codec
+          Log.d(TAG, "Omi codec: $codec (raw=${value[0].toInt() and 0xFF})")
+        }
+      }
+    }
   }
 
   private fun handleNotification(uuid: UUID, data: ByteArray) {
@@ -346,26 +408,31 @@ class PendantBleManager(
     gatt: BluetoothGatt,
     service: android.bluetooth.BluetoothGattService,
   ) {
-    // Subscribe to RX notifications first
     val rxChar = service.getCharacteristic(LIMITLESS_RX) ?: run {
       Log.w(TAG, "Limitless RX characteristic not found")
       return
     }
-    enableNotifications(gatt, rxChar)
-
-    // Write time sync and enable stream commands to TX
     val txChar = service.getCharacteristic(LIMITLESS_TX)
-    if (txChar != null) {
-      scope.launch(Dispatchers.IO) {
-        delay(500) // Allow notification setup to complete
+
+    // Queue all GATT writes sequentially using callbacks
+    scope.launch(Dispatchers.IO) {
+      // 1. Enable RX notifications (writes CCCD descriptor)
+      val notifyOk = enableNotificationsAsync(gatt, rxChar)
+      if (!notifyOk) {
+        Log.w(TAG, "Failed to enable Limitless RX notifications")
+        return@launch
+      }
+
+      // 2. Write time sync + enable stream to TX
+      if (txChar != null) {
         writeLimitlessTimeSyncAndEnable(gatt, txChar)
       }
+      Log.d(TAG, "Limitless setup complete")
     }
-    Log.d(TAG, "Limitless setup complete")
   }
 
   @SuppressLint("MissingPermission")
-  private fun writeLimitlessTimeSyncAndEnable(
+  private suspend fun writeLimitlessTimeSyncAndEnable(
     gatt: BluetoothGatt,
     txChar: BluetoothGattCharacteristic,
   ) {
@@ -380,24 +447,60 @@ class PendantBleManager(
       (now shr 8).toByte(),
       now.toByte(),
     )
-    @Suppress("DEPRECATION")
-    txChar.value = timeSync
-    @Suppress("DEPRECATION")
-    gatt.writeCharacteristic(txChar)
+    if (!writeCharacteristicAsync(gatt, txChar, timeSync)) {
+      Log.w(TAG, "Limitless time sync write failed")
+      return
+    }
     Log.d(TAG, "Limitless time sync written")
 
-    // Small delay between writes
-    Thread.sleep(200)
-
     // Enable audio stream: command byte 0x02
-    val enableStream = byteArrayOf(0x02)
-    @Suppress("DEPRECATION")
-    txChar.value = enableStream
-    @Suppress("DEPRECATION")
-    gatt.writeCharacteristic(txChar)
+    if (!writeCharacteristicAsync(gatt, txChar, byteArrayOf(0x02))) {
+      Log.w(TAG, "Limitless enable stream write failed")
+      return
+    }
     Log.d(TAG, "Limitless stream enabled")
   }
 
+  /** Write a characteristic and suspend until the GATT callback confirms completion. */
+  @SuppressLint("MissingPermission")
+  private suspend fun writeCharacteristicAsync(
+    gatt: BluetoothGatt,
+    characteristic: BluetoothGattCharacteristic,
+    value: ByteArray,
+  ): Boolean = gattWriteMutex.withLock {
+    if (!hasBlePermissions()) return false
+    val deferred = CompletableDeferred<Boolean>()
+    pendingWrite = deferred
+    @Suppress("DEPRECATION")
+    characteristic.value = value
+    @Suppress("DEPRECATION")
+    gatt.writeCharacteristic(characteristic)
+    withTimeoutOrNull(5_000) { deferred.await() } ?: false
+  }
+
+  /** Enable notifications and suspend until the CCCD descriptor write callback fires. */
+  @SuppressLint("MissingPermission")
+  private suspend fun enableNotificationsAsync(
+    gatt: BluetoothGatt,
+    characteristic: BluetoothGattCharacteristic,
+  ): Boolean = gattWriteMutex.withLock {
+    if (!hasBlePermissions()) return false
+    gatt.setCharacteristicNotification(characteristic, true)
+    val descriptor = characteristic.getDescriptor(CCCD) ?: run {
+      Log.w(TAG, "CCCD not found for ${characteristic.uuid}")
+      return false
+    }
+    val deferred = CompletableDeferred<Boolean>()
+    pendingDescriptorWrite = deferred
+    @Suppress("DEPRECATION")
+    descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+    @Suppress("DEPRECATION")
+    gatt.writeDescriptor(descriptor)
+    Log.d(TAG, "Notifications enabling for ${characteristic.uuid}")
+    withTimeoutOrNull(5_000) { deferred.await() } ?: false
+  }
+
+  /** Fire-and-forget notification enable (for Omi where we read codec after). */
   @SuppressLint("MissingPermission")
   private fun enableNotifications(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
     if (!hasBlePermissions()) return

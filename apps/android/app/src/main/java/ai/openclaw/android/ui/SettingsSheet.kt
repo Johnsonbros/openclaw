@@ -364,10 +364,24 @@ fun SettingsSheet(viewModel: MainViewModel) {
         )
       }
       item {
-        Text(
-          "Voice wake and talk modes were removed. Voice now uses one mic on/off flow in the Voice tab.",
-          style = mobileCallout,
-          color = mobileTextSecondary,
+        val talkEnabled by viewModel.talkEnabled.collectAsState()
+        val talkStatusText by viewModel.talkStatusText.collectAsState()
+        ListItem(
+          modifier = settingsRowModifier(),
+          colors = listItemColors,
+          headlineContent = { Text("Interactive Talk Mode", style = mobileHeadline) },
+          supportingContent = {
+            Text(
+              if (talkEnabled) "Active: $talkStatusText" else "ElevenLabs TTS voice conversation. Toggle on in Voice tab or here.",
+              style = mobileCallout,
+            )
+          },
+          trailingContent = {
+            Switch(
+              checked = talkEnabled,
+              onCheckedChange = { viewModel.setTalkEnabled(it) },
+            )
+          },
         )
       }
 
@@ -425,71 +439,37 @@ fun SettingsSheet(viewModel: MainViewModel) {
           },
         )
       }
-      if (pendantEnabled) {
+      item {
+        val stateText = when (pendantConnectionState) {
+          PendantBleManager.ConnectionState.DISCONNECTED -> "Not connected"
+          PendantBleManager.ConnectionState.SCANNING -> "Scanning…"
+          PendantBleManager.ConnectionState.CONNECTING -> "Connecting…"
+          PendantBleManager.ConnectionState.CONNECTED -> {
+            val name = connectedPendant?.name ?: "Pendant"
+            "Connected to $name"
+          }
+        }
+        Text(
+          stateText,
+          style = mobileCallout,
+          color = if (pendantConnectionState == PendantBleManager.ConnectionState.CONNECTED) mobileAccent else mobileTextSecondary,
+        )
+      }
+      item {
+        Text(
+          "Use the Pendant tab for full device setup, scanning, and pairing.",
+          style = mobileCallout,
+          color = mobileTextSecondary,
+        )
+      }
+      if (pendantConnectionState == PendantBleManager.ConnectionState.CONNECTED) {
         item {
-          val stateText = when (pendantConnectionState) {
-            PendantBleManager.ConnectionState.DISCONNECTED -> "Disconnected"
-            PendantBleManager.ConnectionState.SCANNING -> "Scanning…"
-            PendantBleManager.ConnectionState.CONNECTING -> "Connecting…"
-            PendantBleManager.ConnectionState.CONNECTED -> {
-              val name = connectedPendant?.name ?: "Pendant"
-              "Connected to $name"
-            }
-          }
-          Text(stateText, style = mobileCallout, color = mobileTextSecondary)
-        }
-        if (pendantConnectionState == PendantBleManager.ConnectionState.DISCONNECTED ||
-          pendantConnectionState == PendantBleManager.ConnectionState.SCANNING
-        ) {
-          item {
-            Button(
-              onClick = { viewModel.startPendantScan() },
-              enabled = pendantConnectionState != PendantBleManager.ConnectionState.SCANNING,
-              colors = settingsPrimaryButtonColors(),
-              shape = RoundedCornerShape(14.dp),
-            ) {
-              Text(
-                if (pendantConnectionState == PendantBleManager.ConnectionState.SCANNING) "Scanning…" else "Scan",
-                style = mobileCallout.copy(fontWeight = FontWeight.Bold),
-              )
-            }
-          }
-        }
-        if (discoveredPendants.isNotEmpty() &&
-          pendantConnectionState != PendantBleManager.ConnectionState.CONNECTED
-        ) {
-          items(discoveredPendants, key = { it.address }) { pendant ->
-            ListItem(
-              modifier = settingsRowModifier(),
-              colors = listItemColors,
-              headlineContent = { Text(pendant.name, style = mobileHeadline) },
-              supportingContent = {
-                Text(
-                  "${pendant.type.name} • ${pendant.address} • RSSI ${pendant.rssi}",
-                  style = mobileCallout,
-                )
-              },
-              trailingContent = {
-                Button(
-                  onClick = { viewModel.connectPendant(pendant.address) },
-                  colors = settingsPrimaryButtonColors(),
-                  shape = RoundedCornerShape(14.dp),
-                ) {
-                  Text("Connect", style = mobileCallout.copy(fontWeight = FontWeight.Bold))
-                }
-              },
-            )
-          }
-        }
-        if (pendantConnectionState == PendantBleManager.ConnectionState.CONNECTED) {
-          item {
-            Button(
-              onClick = { viewModel.disconnectPendant() },
-              colors = settingsDangerButtonColors(),
-              shape = RoundedCornerShape(14.dp),
-            ) {
-              Text("Disconnect", style = mobileCallout.copy(fontWeight = FontWeight.Bold))
-            }
+          Button(
+            onClick = { viewModel.disconnectPendant() },
+            colors = settingsDangerButtonColors(),
+            shape = RoundedCornerShape(14.dp),
+          ) {
+            Text("Disconnect", style = mobileCallout.copy(fontWeight = FontWeight.Bold))
           }
         }
       }

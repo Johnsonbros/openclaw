@@ -22,11 +22,14 @@ class PendantProtocol {
     private const val MAX_OPUS_FRAME = 400
     // Valid Opus TOC config values: 0-31
     private const val MAX_OPUS_TOC_CONFIG = 31
+    private const val MAX_PENDING_GROUPS = 64
+    private const val MAX_FRAGMENT_AGE_MS = 5_000L
   }
 
   private data class FragmentGroup(
     val totalFragments: Int,
     val fragments: MutableMap<Int, ByteArray> = mutableMapOf(),
+    val createdAt: Long = System.currentTimeMillis(),
   )
 
   private val pending = mutableMapOf<Int, FragmentGroup>()
@@ -58,6 +61,7 @@ class PendantProtocol {
       return extractOpusFrames(payload)
     }
 
+    evictStaleFragments()
     val group = pending.getOrPut(index) { FragmentGroup(numFragments) }
     group.fragments[sequence] = payload
 
@@ -145,6 +149,21 @@ class PendantProtocol {
     val toc = frame[0].toInt() and 0xFF
     val config = toc shr 3
     return config <= MAX_OPUS_TOC_CONFIG
+  }
+
+  private fun evictStaleFragments() {
+    val now = System.currentTimeMillis()
+    val iter = pending.entries.iterator()
+    while (iter.hasNext()) {
+      val entry = iter.next()
+      if (now - entry.value.createdAt > MAX_FRAGMENT_AGE_MS) iter.remove()
+    }
+    // Hard cap: if too many groups, remove oldest
+    if (pending.size > MAX_PENDING_GROUPS) {
+      val sortedKeys = pending.entries.sortedBy { it.value.createdAt }.map { it.key }
+      val toRemove = sortedKeys.take(pending.size - MAX_PENDING_GROUPS)
+      toRemove.forEach { pending.remove(it) }
+    }
   }
 
   /** Clear any buffered fragment state. */

@@ -62,7 +62,7 @@ class SecurePrefs(context: Context) {
   val manualEnabled: StateFlow<Boolean> = _manualEnabled
 
   private val _manualHost =
-    MutableStateFlow(plainPrefs.getString("gateway.manual.host", "nathaniels-macbook-pro.tail5b81a2.ts.net") ?: "nathaniels-macbook-pro.tail5b81a2.ts.net")
+    MutableStateFlow(plainPrefs.getString("gateway.manual.host", "100.82.144.92") ?: "100.82.144.92")
   val manualHost: StateFlow<String> = _manualHost
 
   private val _manualPort =
@@ -70,7 +70,7 @@ class SecurePrefs(context: Context) {
   val manualPort: StateFlow<Int> = _manualPort
 
   private val _manualTls =
-    MutableStateFlow(plainPrefs.getBoolean("gateway.manual.tls", true))
+    MutableStateFlow(plainPrefs.getBoolean("gateway.manual.tls", false))
   val manualTls: StateFlow<Boolean> = _manualTls
 
   private val _gatewayToken = MutableStateFlow(plainPrefs.getString("gateway.manual.token", "493fb5919a16b885fe34bcded2b5e5df4f5c3f2166c361d9") ?: "493fb5919a16b885fe34bcded2b5e5df4f5c3f2166c361d9")

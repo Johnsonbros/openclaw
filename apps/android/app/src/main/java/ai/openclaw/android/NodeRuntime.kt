@@ -514,12 +514,19 @@ class NodeRuntime(context: Context) {
           val port = manualPort.value
           if (host.isNotEmpty() && port in 1..65535) {
             // Security: autoconnect only to previously trusted gateways (stored TLS pin).
-            if (!manualTls.value) return@collect
+            // Tailscale CGNAT range (100.64-127.x.x) is already encrypted at the network level.
+            val isTailscale = host.startsWith("100.") || host.endsWith(".ts.net")
+            if (!manualTls.value && !isTailscale) {
+              return@collect
+            }
             val ep = GatewayEndpoint.manual(host = host, port = port)
+            val tlsParams = connectionManager.resolveTlsParams(ep)
             // Tailscale (.ts.net) bypasses TLS pinning; resolveTlsParams returns null.
-            if (connectionManager.resolveTlsParams(ep) != null) {
+            if (tlsParams != null) {
               val storedFingerprint = prefs.loadGatewayTlsFingerprint(ep.stableId)?.trim().orEmpty()
-              if (storedFingerprint.isEmpty()) return@collect
+              if (storedFingerprint.isEmpty()) {
+                return@collect
+              }
             }
 
             didAutoConnect = true

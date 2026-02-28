@@ -243,11 +243,7 @@ class GatewaySession(
       val url = "$scheme://${endpoint.host}:${endpoint.port}"
       val request = Request.Builder().url(url).build()
       socket = client.newWebSocket(request, Listener())
-      try {
-        connectDeferred.await()
-      } catch (err: Throwable) {
-        throw err
-      }
+      connectDeferred.await()
     }
 
     suspend fun request(method: String, params: JsonElement?, timeoutMs: Long): RpcResponse {

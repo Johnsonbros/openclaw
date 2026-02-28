@@ -2,6 +2,7 @@ package ai.openclaw.android
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import ai.openclaw.android.ble.PendantBleManager
 import ai.openclaw.android.gateway.GatewayEndpoint
 import ai.openclaw.android.chat.OutgoingAttachment
 import ai.openclaw.android.node.CameraCaptureManager
@@ -61,6 +62,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val gatewayToken: StateFlow<String> = runtime.gatewayToken
   val onboardingCompleted: StateFlow<Boolean> = runtime.onboardingCompleted
   val canvasDebugStatusEnabled: StateFlow<Boolean> = runtime.canvasDebugStatusEnabled
+
+  val bleManager: PendantBleManager = runtime.bleManager
+  val pendantEnabled: StateFlow<Boolean> = runtime.pendantEnabled
+  val pendantAudioActive: StateFlow<Boolean> = runtime.pendantAudioActive
 
   val chatSessionKey: StateFlow<String> = runtime.chatSessionKey
   val chatSessionId: StateFlow<String?> = runtime.chatSessionId
@@ -131,6 +136,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setMicEnabled(enabled: Boolean) {
     runtime.setMicEnabled(enabled)
+  }
+
+  fun setPendantEnabled(value: Boolean) {
+    runtime.setPendantEnabled(value)
+  }
+
+  fun startPendantScan() {
+    runtime.startPendantScan()
+  }
+
+  fun connectPendant(address: String) {
+    runtime.connectPendant(address)
+  }
+
+  fun disconnectPendant() {
+    runtime.disconnectPendant()
   }
 
   fun refreshGatewayConnection() {

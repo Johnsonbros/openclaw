@@ -19,6 +19,8 @@ import ai.openclaw.android.gateway.GatewaySession
 import ai.openclaw.android.gateway.probeGatewayTlsFingerprint
 import ai.openclaw.android.node.*
 import ai.openclaw.android.protocol.OpenClawCanvasA2UIAction
+import ai.openclaw.android.ble.PendantAudioBridge
+import ai.openclaw.android.ble.PendantBleManager
 import ai.openclaw.android.voice.MicCaptureManager
 import ai.openclaw.android.voice.VoiceConversationEntry
 import kotlinx.coroutines.CoroutineScope
@@ -305,6 +307,24 @@ class NodeRuntime(context: Context) {
     )
   }
 
+  val bleManager: PendantBleManager by lazy {
+    PendantBleManager(context = appContext, scope = scope)
+  }
+
+  private val pendantAudioBridge: PendantAudioBridge by lazy {
+    PendantAudioBridge(
+      scope = scope,
+      bleManager = bleManager,
+      getSession = { operatorSessionOrNull },
+      isConnected = { operatorConnected },
+    )
+  }
+
+  private val _pendantAudioActive = MutableStateFlow(false)
+  val pendantAudioActive: StateFlow<Boolean> = _pendantAudioActive.asStateFlow()
+
+  val pendantEnabled: StateFlow<Boolean> = prefs.pendantEnabled
+
   val micStatusText: StateFlow<String>
     get() = micCapture.statusText
 
@@ -522,6 +542,23 @@ class NodeRuntime(context: Context) {
     }
 
     scope.launch {
+      bleManager.connectionState.collect { state ->
+        when (state) {
+          PendantBleManager.ConnectionState.CONNECTED -> {
+            pendantAudioBridge.start()
+            _pendantAudioActive.value = true
+          }
+          else -> {
+            if (_pendantAudioActive.value) {
+              pendantAudioBridge.stop()
+              _pendantAudioActive.value = false
+            }
+          }
+        }
+      }
+    }
+
+    scope.launch {
       combine(
         canvasDebugStatusEnabled,
         statusText,
@@ -586,6 +623,29 @@ class NodeRuntime(context: Context) {
     prefs.setTalkEnabled(value)
     micCapture.setMicEnabled(value)
     externalAudioCaptureActive.value = value
+  }
+
+  fun setPendantEnabled(value: Boolean) {
+    prefs.setPendantEnabled(value)
+    if (value) {
+      bleManager.autoConnectLastPaired()
+    } else {
+      disconnectPendant()
+    }
+  }
+
+  fun startPendantScan() {
+    bleManager.startScan()
+  }
+
+  fun connectPendant(address: String) {
+    bleManager.connect(address)
+  }
+
+  fun disconnectPendant() {
+    pendantAudioBridge.stop()
+    _pendantAudioActive.value = false
+    bleManager.disconnect()
   }
 
   fun openGatewayA2uiCanvas(): Boolean {
@@ -674,6 +734,7 @@ class NodeRuntime(context: Context) {
     _pendingGatewayTrust.value = null
     operatorSession.disconnect()
     nodeSession.disconnect()
+    disconnectPendant()
   }
 
   fun handleCanvasA2UIActionFromWebView(payloadJson: String) {

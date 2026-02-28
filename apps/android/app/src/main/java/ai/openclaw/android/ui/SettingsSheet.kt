@@ -66,6 +66,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import ai.openclaw.android.BuildConfig
 import ai.openclaw.android.LocationMode
 import ai.openclaw.android.MainViewModel
+import ai.openclaw.android.ble.PendantBleManager
 
 @Composable
 fun SettingsSheet(viewModel: MainViewModel) {
@@ -173,6 +174,19 @@ fun SettingsSheet(viewModel: MainViewModel) {
     rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
       smsPermissionGranted = granted
       viewModel.refreshGatewayConnection()
+    }
+
+  val pendantEnabled by viewModel.pendantEnabled.collectAsState()
+  val pendantConnectionState by viewModel.bleManager.connectionState.collectAsState()
+  val discoveredPendants by viewModel.bleManager.discoveredPendants.collectAsState()
+  val connectedPendant by viewModel.bleManager.connectedPendant.collectAsState()
+
+  val blePermissionLauncher =
+    rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { perms ->
+      val allGranted = perms.values.all { it }
+      if (allGranted) {
+        viewModel.setPendantEnabled(true)
+      }
     }
 
   DisposableEffect(lifecycleOwner, context) {
@@ -355,6 +369,129 @@ fun SettingsSheet(viewModel: MainViewModel) {
           style = mobileCallout,
           color = mobileTextSecondary,
         )
+      }
+
+      item { HorizontalDivider(color = mobileBorder) }
+
+    // Pendant
+      item {
+        Text(
+          "PENDANT",
+          style = mobileCaption1.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+          color = mobileAccent,
+        )
+      }
+      item {
+        ListItem(
+          modifier = settingsRowModifier(),
+          colors = listItemColors,
+          headlineContent = { Text("Pendant Audio", style = mobileHeadline) },
+          supportingContent = {
+            Text(
+              "Stream audio from an Omi DevKit2 or Limitless pendant to the gateway.",
+              style = mobileCallout,
+            )
+          },
+          trailingContent = {
+            Switch(
+              checked = pendantEnabled,
+              onCheckedChange = { checked ->
+                if (!checked) {
+                  viewModel.setPendantEnabled(false)
+                  return@Switch
+                }
+                val scanOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                  ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) ==
+                    PackageManager.PERMISSION_GRANTED
+                } else true
+                val connectOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                  ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
+                    PackageManager.PERMISSION_GRANTED
+                } else true
+                if (scanOk && connectOk) {
+                  viewModel.setPendantEnabled(true)
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                  blePermissionLauncher.launch(
+                    arrayOf(
+                      Manifest.permission.BLUETOOTH_SCAN,
+                      Manifest.permission.BLUETOOTH_CONNECT,
+                    ),
+                  )
+                } else {
+                  viewModel.setPendantEnabled(true)
+                }
+              },
+            )
+          },
+        )
+      }
+      if (pendantEnabled) {
+        item {
+          val stateText = when (pendantConnectionState) {
+            PendantBleManager.ConnectionState.DISCONNECTED -> "Disconnected"
+            PendantBleManager.ConnectionState.SCANNING -> "Scanning…"
+            PendantBleManager.ConnectionState.CONNECTING -> "Connecting…"
+            PendantBleManager.ConnectionState.CONNECTED -> {
+              val name = connectedPendant?.name ?: "Pendant"
+              "Connected to $name"
+            }
+          }
+          Text(stateText, style = mobileCallout, color = mobileTextSecondary)
+        }
+        if (pendantConnectionState == PendantBleManager.ConnectionState.DISCONNECTED ||
+          pendantConnectionState == PendantBleManager.ConnectionState.SCANNING
+        ) {
+          item {
+            Button(
+              onClick = { viewModel.startPendantScan() },
+              enabled = pendantConnectionState != PendantBleManager.ConnectionState.SCANNING,
+              colors = settingsPrimaryButtonColors(),
+              shape = RoundedCornerShape(14.dp),
+            ) {
+              Text(
+                if (pendantConnectionState == PendantBleManager.ConnectionState.SCANNING) "Scanning…" else "Scan",
+                style = mobileCallout.copy(fontWeight = FontWeight.Bold),
+              )
+            }
+          }
+        }
+        if (discoveredPendants.isNotEmpty() &&
+          pendantConnectionState != PendantBleManager.ConnectionState.CONNECTED
+        ) {
+          items(discoveredPendants, key = { it.address }) { pendant ->
+            ListItem(
+              modifier = settingsRowModifier(),
+              colors = listItemColors,
+              headlineContent = { Text(pendant.name, style = mobileHeadline) },
+              supportingContent = {
+                Text(
+                  "${pendant.type.name} • ${pendant.address} • RSSI ${pendant.rssi}",
+                  style = mobileCallout,
+                )
+              },
+              trailingContent = {
+                Button(
+                  onClick = { viewModel.connectPendant(pendant.address) },
+                  colors = settingsPrimaryButtonColors(),
+                  shape = RoundedCornerShape(14.dp),
+                ) {
+                  Text("Connect", style = mobileCallout.copy(fontWeight = FontWeight.Bold))
+                }
+              },
+            )
+          }
+        }
+        if (pendantConnectionState == PendantBleManager.ConnectionState.CONNECTED) {
+          item {
+            Button(
+              onClick = { viewModel.disconnectPendant() },
+              colors = settingsDangerButtonColors(),
+              shape = RoundedCornerShape(14.dp),
+            ) {
+              Text("Disconnect", style = mobileCallout.copy(fontWeight = FontWeight.Bold))
+            }
+          }
+        }
       }
 
       item { HorizontalDivider(color = mobileBorder) }

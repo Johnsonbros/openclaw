@@ -14,6 +14,7 @@ import { normalizeMainKey } from "../routing/session-key.js";
 import { defaultRuntime } from "../runtime.js";
 import { parseMessageWithAttachments } from "./chat-attachments.js";
 import { normalizeRpcAttachmentsToChatAttachments } from "./server-methods/attachment-normalize.js";
+import { AudioInputProcessor } from "./audio-input-processor.js";
 import type { NodeEvent, NodeEventContext } from "./server-node-events-types.js";
 import {
   loadSessionEntry,
@@ -21,6 +22,8 @@ import {
   resolveGatewaySessionStoreTarget,
 } from "./session-utils.js";
 import { formatForLog } from "./ws-log.js";
+
+const audioInputProcessor = new AudioInputProcessor();
 
 const MAX_EXEC_EVENT_OUTPUT_CHARS = 180;
 const VOICE_TRANSCRIPT_DEDUPE_WINDOW_MS = 1500;
@@ -309,6 +312,12 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
       ).catch((err) => {
         ctx.logGateway.warn(`agent failed node=${nodeId}: ${formatForLog(err)}`);
       });
+      return;
+    }
+    case "audio.input": {
+      const obj = parsePayloadObject(evt.payloadJSON);
+      if (!obj) return;
+      audioInputProcessor.ingestChunk(obj, ctx, nodeId);
       return;
     }
     case "agent.request": {

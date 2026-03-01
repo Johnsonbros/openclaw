@@ -135,6 +135,7 @@ class GatewaySession(
 
   fun currentCanvasHostUrl(): String? = canvasHostUrl
   fun currentMainSessionKey(): String? = mainSessionKey
+  fun getConnectedHost(): String? = desired?.endpoint?.host
 
   suspend fun sendNodeEvent(event: String, payloadJson: String?): Boolean {
     val conn = currentConnection ?: return false

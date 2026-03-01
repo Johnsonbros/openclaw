@@ -7,7 +7,9 @@ import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioRecord
 import android.media.AudioTrack
+import android.media.MediaRecorder
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.Handler
@@ -23,6 +25,7 @@ import androidx.core.content.ContextCompat
 import ai.openclaw.android.gateway.GatewaySession
 import ai.openclaw.android.isCanonicalMainSessionKey
 import ai.openclaw.android.normalizeMainKey
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -42,6 +45,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlin.math.max
+import kotlin.math.sqrt
 
 class TalkModeManager(
   private val context: Context,
@@ -122,6 +126,13 @@ class TalkModeManager(
   private var restartJob: Job? = null
   private var stopRequested = false
   private var listeningMode = false
+  private var whisperFallbackActive = false
+  private var audioRecord: AudioRecord? = null
+  private var whisperRecordJob: Job? = null
+  private var whisperPcmBuffer = ByteArrayOutputStream()
+  private var whisperLastVoiceAt: Long = 0L
+  private val whisperSilenceMs = 700L
+  private val whisperRmsThreshold = 300
 
   private var silenceJob: Job? = null
   private val silenceWindowMs = 700L
@@ -201,12 +212,6 @@ class TalkModeManager(
       listeningMode = true
       Log.d(tag, "start")
 
-      if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-        _statusText.value = "Speech recognizer unavailable"
-        Log.w(tag, "speech recognizer unavailable")
-        return@post
-      }
-
       val micOk =
         ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
           PackageManager.PERMISSION_GRANTED
@@ -216,7 +221,14 @@ class TalkModeManager(
         return@post
       }
 
+      if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+        Log.w(tag, "speech recognizer unavailable, using Whisper fallback")
+        startWhisperFallback()
+        return@post
+      }
+
       try {
+        whisperFallbackActive = false
         recognizer?.destroy()
         recognizer = SpeechRecognizer.createSpeechRecognizer(context).also { it.setRecognitionListener(listener) }
         startListeningInternal(markListening = true)
@@ -243,6 +255,7 @@ class TalkModeManager(
     stopSpeaking()
     _usingFallbackTts.value = false
     chatSubscribedSessionKey = null
+    stopWhisperFallback()
 
     mainHandler.post {
       recognizer?.cancel()
@@ -1150,6 +1163,131 @@ class TalkModeManager(
       } else {
         timestamp >= sinceSeconds - 0.5
       }
+    }
+  }
+
+  // ── Whisper fallback: records PCM directly when SpeechRecognizer is unavailable ──
+
+  @Suppress("MissingPermission") // Permission is checked in start() before reaching here
+  private fun startWhisperFallback() {
+    whisperFallbackActive = true
+    whisperPcmBuffer.reset()
+    whisperLastVoiceAt = SystemClock.elapsedRealtime()
+
+    val sampleRate = 16000
+    val bufSize = max(
+      AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT),
+      4096,
+    )
+
+    val recorder = AudioRecord(
+      MediaRecorder.AudioSource.MIC,
+      sampleRate,
+      AudioFormat.CHANNEL_IN_MONO,
+      AudioFormat.ENCODING_PCM_16BIT,
+      bufSize,
+    )
+    if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+      _statusText.value = "Mic init failed"
+      Log.e(tag, "AudioRecord failed to initialize")
+      whisperFallbackActive = false
+      return
+    }
+    audioRecord = recorder
+    recorder.startRecording()
+    _isListening.value = true
+    _statusText.value = "Listening (Whisper)"
+    Log.d(tag, "whisper fallback listening")
+
+    whisperRecordJob = scope.launch(Dispatchers.IO) {
+      val buf = ShortArray(bufSize / 2)
+      while (whisperFallbackActive && !stopRequested) {
+        val read = recorder.read(buf, 0, buf.size)
+        if (read <= 0) continue
+
+        // Write raw PCM bytes
+        val bytes = ByteArray(read * 2)
+        for (i in 0 until read) {
+          bytes[i * 2] = (buf[i].toInt() and 0xFF).toByte()
+          bytes[i * 2 + 1] = (buf[i].toInt() shr 8 and 0xFF).toByte()
+        }
+        synchronized(whisperPcmBuffer) {
+          whisperPcmBuffer.write(bytes)
+        }
+
+        // Compute RMS for voice activity
+        var sumSq = 0.0
+        for (i in 0 until read) {
+          sumSq += buf[i].toDouble() * buf[i].toDouble()
+        }
+        val rms = sqrt(sumSq / read)
+
+        if (rms > whisperRmsThreshold) {
+          whisperLastVoiceAt = SystemClock.elapsedRealtime()
+        }
+
+        // Check for silence pause
+        val silenceElapsed = SystemClock.elapsedRealtime() - whisperLastVoiceAt
+        val bufferSize = synchronized(whisperPcmBuffer) { whisperPcmBuffer.size() }
+        if (silenceElapsed >= whisperSilenceMs && bufferSize > sampleRate * 2) {
+          // Enough silence and enough audio — transcribe
+          val pcm = synchronized(whisperPcmBuffer) {
+            val data = whisperPcmBuffer.toByteArray()
+            whisperPcmBuffer.reset()
+            data
+          }
+          val text = transcribeViaWhisper(pcm)
+          if (!text.isNullOrBlank()) {
+            scope.launch(Dispatchers.Main) {
+              handleTranscript(text, isFinal = true)
+            }
+          }
+          whisperLastVoiceAt = SystemClock.elapsedRealtime()
+        }
+      }
+    }
+  }
+
+  private fun stopWhisperFallback() {
+    whisperFallbackActive = false
+    whisperRecordJob?.cancel()
+    whisperRecordJob = null
+    try {
+      audioRecord?.stop()
+      audioRecord?.release()
+    } catch (_: Throwable) {}
+    audioRecord = null
+    whisperPcmBuffer.reset()
+  }
+
+  private fun transcribeViaWhisper(pcm: ByteArray): String? {
+    return try {
+      val gatewayHost = session.getConnectedHost() ?: "localhost"
+      val whisperUrl = "http://$gatewayHost:8778/transcribe"
+      val url = URL(whisperUrl)
+      val conn = url.openConnection() as HttpURLConnection
+      conn.requestMethod = "POST"
+      conn.doOutput = true
+      conn.connectTimeout = 10_000
+      conn.readTimeout = 30_000
+      conn.setRequestProperty("Content-Type", "application/octet-stream")
+      conn.outputStream.use { it.write(pcm) }
+
+      val code = conn.responseCode
+      if (code != 200) {
+        Log.w(tag, "whisper HTTP $code")
+        return null
+      }
+      val body = conn.inputStream.readBytes().toString(Charsets.UTF_8)
+      val obj = json.parseToJsonElement(body).asObjectOrNull()
+      val text = obj?.get("text").asStringOrNull()?.trim()
+      if (!text.isNullOrBlank()) {
+        Log.d(tag, "whisper transcript: $text")
+      }
+      text
+    } catch (err: Throwable) {
+      Log.w(tag, "whisper request failed: ${err.message ?: err::class.simpleName}")
+      null
     }
   }
 

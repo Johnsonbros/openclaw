@@ -18,6 +18,7 @@ import ai.openclaw.android.gateway.GatewayEndpoint
 import ai.openclaw.android.gateway.GatewaySession
 import ai.openclaw.android.gateway.probeGatewayTlsFingerprint
 import ai.openclaw.android.node.*
+import ai.openclaw.android.node.AgentNotificationManager
 import ai.openclaw.android.protocol.OpenClawCanvasA2UIAction
 import ai.openclaw.android.ble.PendantAudioBridge
 import ai.openclaw.android.ble.PendantBleManager
@@ -55,6 +56,8 @@ class NodeRuntime(context: Context) {
   val screenRecorder = ScreenRecordManager(appContext)
   val sms = SmsManager(appContext)
   private val json = Json { ignoreUnknownKeys = true }
+
+  val agentNotifications = AgentNotificationManager(appContext)
 
   private val externalAudioCaptureActive = MutableStateFlow(false)
 
@@ -122,7 +125,7 @@ class NodeRuntime(context: Context) {
     prefs = prefs,
     cameraEnabled = { cameraEnabled.value },
     locationMode = { locationMode.value },
-    voiceWakeMode = { VoiceWakeMode.Off },
+    voiceWakeMode = { prefs.voiceWakeMode.value },
     smsAvailable = { sms.canSendSms() },
     hasRecordAudioPermission = { hasRecordAudioPermission() },
     manualTls = { manualTls.value },
@@ -286,7 +289,7 @@ class NodeRuntime(context: Context) {
       scope = scope,
       session = operatorSession,
       json = json,
-      supportsChatSubscribe = false,
+      supportsChatSubscribe = true,
     )
   private val micCapture: MicCaptureManager by lazy {
     MicCaptureManager(
@@ -328,6 +331,9 @@ class NodeRuntime(context: Context) {
     get() = talkMode.isSpeaking
   val talkLastAssistantText: StateFlow<String?>
     get() = talkMode.lastAssistantText
+
+  val talkConversation: StateFlow<List<VoiceConversationEntry>>
+    get() = talkMode.conversation
 
   fun setTalkEnabled(value: Boolean) {
     talkMode.setEnabled(value)
@@ -475,6 +481,17 @@ class NodeRuntime(context: Context) {
     }
   }
 
+  val voiceWakeMode: StateFlow<VoiceWakeMode> = prefs.voiceWakeMode
+  val wakeWords: StateFlow<List<String>> = prefs.wakeWords
+
+  fun setVoiceWakeMode(mode: VoiceWakeMode) {
+    prefs.setVoiceWakeMode(mode)
+  }
+
+  fun setWakeWords(words: List<String>) {
+    prefs.setWakeWords(words)
+  }
+
   val instanceId: StateFlow<String> = prefs.instanceId
   val displayName: StateFlow<String> = prefs.displayName
   val cameraEnabled: StateFlow<Boolean> = prefs.cameraEnabled
@@ -619,6 +636,9 @@ class NodeRuntime(context: Context) {
 
   fun setForeground(value: Boolean) {
     _isForeground.value = value
+    if (value) {
+      agentNotifications.dismissAll()
+    }
   }
 
   fun setDisplayName(value: String) {
@@ -884,6 +904,22 @@ class NodeRuntime(context: Context) {
     micCapture.handleGatewayEvent(event, payloadJson)
     chat.handleGatewayEvent(event, payloadJson)
     talkMode.handleGatewayEvent(event, payloadJson)
+
+    // Post notification when agent responds while app is backgrounded
+    if (!_isForeground.value && event == "chat.event" && payloadJson != null) {
+      try {
+        val payload = json.parseToJsonElement(payloadJson).asObjectOrNull()
+        val role = payload?.get("role").asStringOrNull()
+        val text = payload?.get("text").asStringOrNull()?.trim()
+          ?: payload?.get("content").asStringOrNull()?.trim()
+        if (role == "assistant" && !text.isNullOrBlank()) {
+          val sessionKey = payload?.get("sessionKey").asStringOrNull()
+          agentNotifications.postAgentResponse(text, sessionKey)
+        }
+      } catch (_: Throwable) {
+        // ignore malformed events
+      }
+    }
   }
 
   private fun parseChatSendRunId(response: String): String? {

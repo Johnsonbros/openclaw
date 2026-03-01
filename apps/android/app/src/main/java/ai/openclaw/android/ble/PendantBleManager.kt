@@ -55,6 +55,11 @@ class PendantBleManager(
     val OMI_AUDIO: UUID = UUID.fromString("19b10001-e8f2-537e-4f6c-d104768a1214")
     val OMI_CODEC: UUID = UUID.fromString("19b10002-e8f2-537e-4f6c-d104768a1214")
 
+    // MimicLaw DOT (ESP32-S3) UUIDs
+    val DOT_SERVICE: UUID = UUID.fromString("d0700001-e8f2-537e-4f6c-d104768a1214")
+    val DOT_AUDIO: UUID = UUID.fromString("d0700002-e8f2-537e-4f6c-d104768a1214")
+    val DOT_DISPLAY: UUID = UUID.fromString("d0700003-e8f2-537e-4f6c-d104768a1214")
+
     // CCCD for enabling notifications
     private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
@@ -64,7 +69,7 @@ class PendantBleManager(
   }
 
   enum class ConnectionState { DISCONNECTED, SCANNING, CONNECTING, CONNECTED }
-  enum class PendantType { OMI, LIMITLESS, UNKNOWN }
+  enum class PendantType { OMI, LIMITLESS, DOT, UNKNOWN }
 
   data class PendantInfo(
     val name: String,
@@ -120,9 +125,14 @@ class PendantBleManager(
     get() = prefs.getString("last_paired_address", null)
 
   private fun hasBlePermissions(): Boolean {
-    val connect = ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
-    val scan = ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN)
-    return connect == PackageManager.PERMISSION_GRANTED && scan == PackageManager.PERMISSION_GRANTED
+    return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+      ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+    } else {
+      // Pre-Android 12: legacy BLUETOOTH permission is normal (auto-granted), but
+      // ACCESS_FINE_LOCATION is required at runtime for BLE scanning
+      ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    }
   }
 
   @SuppressLint("MissingPermission")
@@ -147,6 +157,7 @@ class PendantBleManager(
     val filters = listOf(
       ScanFilter.Builder().setServiceUuid(ParcelUuid(LIMITLESS_SERVICE)).build(),
       ScanFilter.Builder().setServiceUuid(ParcelUuid(OMI_SERVICE)).build(),
+      ScanFilter.Builder().setServiceUuid(ParcelUuid(DOT_SERVICE)).build(),
     )
     val settings = ScanSettings.Builder()
       .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -223,6 +234,7 @@ class PendantBleManager(
       val uuids = result.scanRecord?.serviceUuids?.map { it.uuid } ?: emptyList()
 
       val type = when {
+        uuids.contains(DOT_SERVICE) -> PendantType.DOT
         uuids.contains(OMI_SERVICE) -> PendantType.OMI
         uuids.contains(LIMITLESS_SERVICE) -> PendantType.LIMITLESS
         else -> PendantType.UNKNOWN
@@ -286,10 +298,15 @@ class PendantBleManager(
       }
       Log.d(TAG, "Services discovered")
 
+      val dotService = gatt.getService(DOT_SERVICE)
       val omiService = gatt.getService(OMI_SERVICE)
       val limitlessService = gatt.getService(LIMITLESS_SERVICE)
 
       when {
+        dotService != null -> {
+          connectedType = PendantType.DOT
+          setupDot(gatt, dotService)
+        }
         omiService != null -> {
           connectedType = PendantType.OMI
           setupOmi(gatt, omiService)
@@ -378,10 +395,24 @@ class PendantBleManager(
 
   private fun handleNotification(uuid: UUID, data: ByteArray) {
     when (uuid) {
-      OMI_AUDIO, LIMITLESS_RX -> {
+      OMI_AUDIO, LIMITLESS_RX, DOT_AUDIO -> {
         _audioData.tryEmit(data)
       }
     }
+  }
+
+  @SuppressLint("MissingPermission")
+  private fun setupDot(
+    gatt: BluetoothGatt,
+    service: android.bluetooth.BluetoothGattService,
+  ) {
+    val audioChar = service.getCharacteristic(DOT_AUDIO) ?: run {
+      Log.w(TAG, "DOT audio characteristic not found")
+      return
+    }
+    enableNotifications(gatt, audioChar)
+    _codec.value = PendantCodec.PCM16
+    Log.d(TAG, "MimicLaw DOT setup complete")
   }
 
   @SuppressLint("MissingPermission")

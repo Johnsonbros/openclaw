@@ -28,8 +28,22 @@ android {
     }
   }
 
-  flavorDimensions += "apiLevel"
+  flavorDimensions += listOf("brand", "apiLevel")
   productFlavors {
+    create("openclaw") {
+      dimension = "brand"
+      applicationId = "ai.openclaw.android"
+      buildConfigField("String", "DEFAULT_GATEWAY_HOST", "\"100.82.144.92\"")
+      buildConfigField("int", "DEFAULT_GATEWAY_PORT", "18789")
+      buildConfigField("String", "BRAND_CLIENT_ID", "\"openclaw-android\"")
+    }
+    create("aisync") {
+      dimension = "brand"
+      applicationId = "services.aisync.assistant"
+      buildConfigField("String", "DEFAULT_GATEWAY_HOST", "\"100.82.144.92\"")
+      buildConfigField("int", "DEFAULT_GATEWAY_PORT", "18789")
+      buildConfigField("String", "BRAND_CLIENT_ID", "\"aisync-android\"")
+    }
     create("compat") {
       dimension = "apiLevel"
       minSdk = 26
@@ -98,7 +112,8 @@ androidComponents {
         val buildType = variant.buildType
 
         val flavor = variant.flavorName ?: "default"
-        val outputFileName = "openclaw-${versionName}-${flavor}-${buildType}.apk"
+        val brand = variant.productFlavors.firstOrNull { it.first == "brand" }?.second ?: "openclaw"
+        val outputFileName = "${brand}-${versionName}-${flavor}-${buildType}.apk"
         output.outputFileName = outputFileName
       }
   }

@@ -10,6 +10,31 @@ log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [startup] $1" >> "$LOG"
 }
 
+# ── Pre-flight: wait for Docker & Postgres ──────────────────────
+MAX_WAIT=120  # seconds
+WAITED=0
+log "Waiting for Docker..."
+while ! docker info >/dev/null 2>&1; do
+    sleep 5
+    WAITED=$((WAITED + 5))
+    if [ "$WAITED" -ge "$MAX_WAIT" ]; then
+        log "FATAL: Docker not available after ${MAX_WAIT}s — aborting"
+        exit 1
+    fi
+done
+log "Docker ready (waited ${WAITED}s)"
+
+log "Waiting for Postgres..."
+while ! docker exec openclaw-postgres pg_isready -U zeke >/dev/null 2>&1; do
+    sleep 5
+    WAITED=$((WAITED + 5))
+    if [ "$WAITED" -ge "$MAX_WAIT" ]; then
+        log "FATAL: Postgres not ready after ${MAX_WAIT}s — aborting"
+        exit 1
+    fi
+done
+log "Postgres ready (total wait ${WAITED}s)"
+
 # Tell zeke to stop its gateway immediately (best-effort, don't block on failure)
 if $ZEKE_SSH "sudo systemctl stop openclaw.service 2>/dev/null; rm -f /tmp/openclaw-failover-active" 2>/dev/null; then
     log "Notified zeke to stop failover gateway"

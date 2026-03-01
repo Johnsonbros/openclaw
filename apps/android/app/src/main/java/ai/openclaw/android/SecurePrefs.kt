@@ -4,6 +4,7 @@ package ai.openclaw.android
 
 import android.content.Context
 import android.content.SharedPreferences
+import ai.openclaw.android.BuildConfig
 import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
@@ -17,7 +18,9 @@ import java.util.UUID
 
 class SecurePrefs(context: Context) {
   companion object {
-    val defaultWakeWords: List<String> = listOf("openclaw", "claude")
+    val defaultWakeWords: List<String> =
+      if (BuildConfig.FLAVOR_brand == "aisync") listOf("aisync", "hey sync")
+      else listOf("zeke", "hey zeke")
     private const val displayNameKey = "node.displayName"
     private const val voiceWakeModeKey = "voiceWake.mode"
     private const val plainPrefsName = "openclaw.node"
@@ -62,11 +65,11 @@ class SecurePrefs(context: Context) {
   val manualEnabled: StateFlow<Boolean> = _manualEnabled
 
   private val _manualHost =
-    MutableStateFlow(plainPrefs.getString("gateway.manual.host", "100.82.144.92") ?: "100.82.144.92")
+    MutableStateFlow(plainPrefs.getString("gateway.manual.host", BuildConfig.DEFAULT_GATEWAY_HOST) ?: BuildConfig.DEFAULT_GATEWAY_HOST)
   val manualHost: StateFlow<String> = _manualHost
 
   private val _manualPort =
-    MutableStateFlow(plainPrefs.getInt("gateway.manual.port", 18789))
+    MutableStateFlow(plainPrefs.getInt("gateway.manual.port", BuildConfig.DEFAULT_GATEWAY_PORT))
   val manualPort: StateFlow<Int> = _manualPort
 
   private val _manualTls =

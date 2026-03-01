@@ -66,6 +66,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import ai.openclaw.android.BuildConfig
 import ai.openclaw.android.LocationMode
 import ai.openclaw.android.MainViewModel
+import ai.openclaw.android.VoiceWakeMode
 import ai.openclaw.android.ble.PendantBleManager
 
 @Composable
@@ -382,6 +383,76 @@ fun SettingsSheet(viewModel: MainViewModel) {
               onCheckedChange = { viewModel.setTalkEnabled(it) },
             )
           },
+        )
+      }
+
+      // Wake word
+      item {
+        val voiceWakeMode by viewModel.voiceWakeMode.collectAsState()
+        Column(modifier = settingsRowModifier(), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = { Text("Wake Word Detection", style = mobileHeadline) },
+            supportingContent = { Text("Activate by saying a wake word.", style = mobileCallout) },
+            trailingContent = {},
+          )
+          HorizontalDivider(color = mobileBorder)
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = { Text("Off", style = mobileHeadline) },
+            trailingContent = {
+              RadioButton(
+                selected = voiceWakeMode == VoiceWakeMode.Off,
+                onClick = { viewModel.setVoiceWakeMode(VoiceWakeMode.Off) },
+              )
+            },
+          )
+          HorizontalDivider(color = mobileBorder)
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = { Text("Foreground only", style = mobileHeadline) },
+            supportingContent = { Text("Listen for wake words while app is open.", style = mobileCallout) },
+            trailingContent = {
+              RadioButton(
+                selected = voiceWakeMode == VoiceWakeMode.Foreground,
+                onClick = { viewModel.setVoiceWakeMode(VoiceWakeMode.Foreground) },
+              )
+            },
+          )
+          HorizontalDivider(color = mobileBorder)
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = { Text("Always", style = mobileHeadline) },
+            supportingContent = { Text("Listen even when backgrounded (uses more battery).", style = mobileCallout) },
+            trailingContent = {
+              RadioButton(
+                selected = voiceWakeMode == VoiceWakeMode.Always,
+                onClick = { viewModel.setVoiceWakeMode(VoiceWakeMode.Always) },
+              )
+            },
+          )
+        }
+      }
+      item {
+        val wakeWords by viewModel.wakeWords.collectAsState()
+        var wakeWordsText by remember(wakeWords) { mutableStateOf(wakeWords.joinToString(", ")) }
+        OutlinedTextField(
+          value = wakeWordsText,
+          onValueChange = { value ->
+            wakeWordsText = value
+            val parsed = value.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            if (parsed.isNotEmpty()) {
+              viewModel.setWakeWords(parsed)
+            }
+          },
+          label = { Text("Wake words (comma-separated)", style = mobileCaption1, color = mobileTextSecondary) },
+          modifier = Modifier.fillMaxWidth(),
+          textStyle = mobileBody.copy(color = mobileText),
+          colors = settingsTextFieldColors(),
         )
       }
 

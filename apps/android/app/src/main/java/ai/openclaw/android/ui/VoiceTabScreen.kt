@@ -103,6 +103,7 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
   val talkIsListening by viewModel.talkIsListening.collectAsState()
   val talkIsSpeaking by viewModel.talkIsSpeaking.collectAsState()
   val talkLastAssistantText by viewModel.talkLastAssistantText.collectAsState()
+  val talkConversation by viewModel.talkConversation.collectAsState()
 
   // false = simple mic mode, true = interactive talk mode
   var interactiveTalkMode by remember { mutableStateOf(false) }
@@ -133,8 +134,9 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
       pendingMicEnable = false
     }
 
-  LaunchedEffect(micConversation.size, showThinkingBubble) {
-    val total = micConversation.size + if (showThinkingBubble) 1 else 0
+  LaunchedEffect(micConversation.size, talkConversation.size, showThinkingBubble) {
+    val conversationSize = if (interactiveTalkMode) talkConversation.size else micConversation.size
+    val total = conversationSize + if (showThinkingBubble) 1 else 0
     if (total > 0) {
       listState.animateScrollToItem(total - 1)
     }
@@ -210,20 +212,23 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
       }
     }
 
+    val activeConversation = if (interactiveTalkMode) talkConversation else micConversation
+
     LazyColumn(
       state = listState,
       modifier = Modifier.fillMaxWidth().weight(1f),
       contentPadding = PaddingValues(vertical = 4.dp),
       verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-      if (micConversation.isEmpty() && !showThinkingBubble) {
+      if (activeConversation.isEmpty() && !showThinkingBubble) {
         item {
           Column(
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
           ) {
             Text(
-              "Tap the mic and speak. Each pause sends a turn automatically.",
+              if (interactiveTalkMode) "Tap the mic to start a voice conversation."
+              else "Tap the mic and speak. Each pause sends a turn automatically.",
               style = mobileCallout,
               color = mobileTextSecondary,
             )
@@ -231,7 +236,7 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
         }
       }
 
-      items(items = micConversation, key = { it.id }) { entry ->
+      items(items = activeConversation, key = { it.id }) { entry ->
         VoiceTurnBubble(entry = entry)
       }
 

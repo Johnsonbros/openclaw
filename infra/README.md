@@ -8,14 +8,18 @@ Operational scripts and service definitions for running OpenClaw in a Mac-primar
 infra/
 ├── README.md              # This file
 ├── scripts/
-│   ├── gateway-start.sh      # Mac gateway startup wrapper
-│   ├── db-sync.sh            # PostgreSQL Mac → zeke replication (5min interval)
-│   ├── health-check.sh       # Mac gateway health verification
-│   └── openclaw-failover.sh  # zeke failover watchdog
+│   ├── gateway-start.sh          # Mac gateway startup wrapper (waits for Docker/Postgres)
+│   ├── watchdog.sh               # Automated health check + recovery (every 60s)
+│   ├── install-mac-services.sh   # One-shot installer for all Mac services
+│   ├── db-sync.sh                # PostgreSQL Mac → zeke replication (5min interval)
+│   ├── health-check.sh           # Mac gateway health verification (manual/diagnostic)
+│   └── openclaw-failover.sh      # zeke failover watchdog
 ├── launchd/
-│   ├── ai.openclaw.gateway.plist   # Mac gateway service
-│   ├── ai.openclaw.node.plist      # Mac node host service
-│   └── ai.openclaw.db-sync.plist   # Mac DB sync timer
+│   ├── ai.openclaw.gateway.plist     # Mac gateway service
+│   ├── ai.openclaw.node.plist        # Mac node host service
+│   ├── ai.openclaw.db-sync.plist     # Mac DB sync timer
+│   ├── ai.openclaw.caffeinate.plist  # Prevents macOS sleep
+│   └── ai.openclaw.watchdog.plist    # Runs watchdog every 60s
 └── systemd/
     ├── openclaw-failover.service   # zeke failover oneshot
     └── openclaw-failover.timer     # zeke 15s health check timer
@@ -42,26 +46,13 @@ infra/
      postgres:16
    ```
 
-2. Copy service plists to `~/Library/LaunchAgents/`:
+2. Run the installer (copies plists, scripts, and loads all services):
 
    ```bash
-   cp infra/launchd/*.plist ~/Library/LaunchAgents/
+   bash infra/scripts/install-mac-services.sh
    ```
 
-3. Copy scripts to `~/.openclaw/scripts/`:
-
-   ```bash
-   mkdir -p ~/.openclaw/scripts
-   cp infra/scripts/gateway-start.sh infra/scripts/db-sync.sh infra/scripts/health-check.sh ~/.openclaw/scripts/
-   chmod +x ~/.openclaw/scripts/*.sh
-   ```
-
-4. Load services:
-   ```bash
-   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.openclaw.gateway.plist
-   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.openclaw.node.plist
-   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.openclaw.db-sync.plist
-   ```
+   Or manually: copy plists to `~/Library/LaunchAgents/`, scripts to `~/.openclaw/scripts/`, and `launchctl bootstrap` each service.
 
 ### zeke Setup
 
@@ -100,6 +91,7 @@ Verifies: gateway HTTP, launchd services, Docker, PostgreSQL, DB sync, Tailscale
 | Log             | Command                                                    |
 | --------------- | ---------------------------------------------------------- |
 | Gateway (Mac)   | `tail -f ~/.openclaw/logs/gateway.log`                     |
+| Watchdog (Mac)  | `tail -f ~/.openclaw/logs/watchdog.log`                    |
 | DB Sync (Mac)   | `tail -f ~/.openclaw/logs/db-sync.log`                     |
 | Failover (zeke) | `ssh ubuntu@zeke "tail -f /var/log/openclaw-failover.log"` |
 

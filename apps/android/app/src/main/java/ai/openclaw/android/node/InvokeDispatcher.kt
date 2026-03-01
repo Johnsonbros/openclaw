@@ -52,7 +52,10 @@ class InvokeDispatcher(
         canvas.navigate(url)
         GatewaySession.InvokeResult.ok(null)
       }
-      OpenClawCanvasCommand.Hide.rawValue -> GatewaySession.InvokeResult.ok(null)
+      OpenClawCanvasCommand.Hide.rawValue -> {
+        canvas.navigate("")
+        GatewaySession.InvokeResult.ok(null)
+      }
       OpenClawCanvasCommand.Navigate.rawValue -> {
         val url = CanvasController.parseNavigateUrl(paramsJson)
         canvas.navigate(url)

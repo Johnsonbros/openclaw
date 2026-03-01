@@ -31,7 +31,8 @@ class NodeForegroundService : Service() {
     super.onCreate()
     isRunning = true
     ensureChannel()
-    val initial = buildNotification(title = "OpenClaw Node", text = "Starting…")
+    val brandName = getString(R.string.app_name)
+    val initial = buildNotification(title = brandName, text = "Starting…")
     startForegroundWithTypes(notification = initial, requiresMic = false)
 
     val runtime = (application as NodeApp).runtime
@@ -46,7 +47,7 @@ class NodeForegroundService : Service() {
         ) { status, server, connected, micEnabled, micListening ->
           Quint(status, server, connected, micEnabled, micListening)
         }.collect { (status, server, connected, micEnabled, micListening) ->
-          val title = if (connected) "OpenClaw Node · Connected" else "OpenClaw Node"
+          val title = if (connected) "$brandName · Connected" else brandName
           val micSuffix =
             if (micEnabled) {
               if (micListening) " · Mic: Listening" else " · Mic: Pending"

@@ -67,11 +67,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val pendantEnabled: StateFlow<Boolean> = runtime.pendantEnabled
   val pendantAudioActive: StateFlow<Boolean> = runtime.pendantAudioActive
 
+  val voiceWakeMode: StateFlow<VoiceWakeMode> = runtime.voiceWakeMode
+  val wakeWords: StateFlow<List<String>> = runtime.wakeWords
+
+  fun setVoiceWakeMode(mode: VoiceWakeMode) {
+    runtime.setVoiceWakeMode(mode)
+  }
+
+  fun setWakeWords(words: List<String>) {
+    runtime.setWakeWords(words)
+  }
+
   val talkEnabled: StateFlow<Boolean> = runtime.talkEnabled
   val talkStatusText: StateFlow<String> = runtime.talkStatusText
   val talkIsListening: StateFlow<Boolean> = runtime.talkIsListening
   val talkIsSpeaking: StateFlow<Boolean> = runtime.talkIsSpeaking
   val talkLastAssistantText: StateFlow<String?> = runtime.talkLastAssistantText
+  val talkConversation = runtime.talkConversation
 
   val chatSessionKey: StateFlow<String> = runtime.chatSessionKey
   val chatSessionId: StateFlow<String?> = runtime.chatSessionId

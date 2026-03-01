@@ -119,6 +119,22 @@ class TalkModeManager(
   private val _lastAssistantText = MutableStateFlow<String?>(null)
   val lastAssistantText: StateFlow<String?> = _lastAssistantText
 
+  private val _conversation = MutableStateFlow<List<VoiceConversationEntry>>(emptyList())
+  val conversation: StateFlow<List<VoiceConversationEntry>> = _conversation
+
+  private var talkEntryCounter = 0L
+  private fun nextTalkEntryId(): String = "talk-${talkEntryCounter++}"
+
+  private fun addConversationEntry(role: VoiceConversationRole, text: String) {
+    val entry = VoiceConversationEntry(
+      id = nextTalkEntryId(),
+      role = role,
+      text = text,
+      isStreaming = false,
+    )
+    _conversation.value = _conversation.value + entry
+  }
+
   private val _usingFallbackTts = MutableStateFlow(false)
   val usingFallbackTts: StateFlow<Boolean> = _usingFallbackTts
 
@@ -354,6 +370,7 @@ class TalkModeManager(
     _statusText.value = "Thinking…"
     lastTranscript = ""
     lastHeardAtMs = null
+    addConversationEntry(VoiceConversationRole.User, transcript)
 
     reloadConfig()
     val prompt = buildPrompt(transcript)
@@ -514,6 +531,7 @@ class TalkModeManager(
     val cleaned = parsed.stripped.trim()
     if (cleaned.isEmpty()) return
     _lastAssistantText.value = cleaned
+    addConversationEntry(VoiceConversationRole.Assistant, cleaned)
 
     val requestedVoice = directive?.voiceId?.trim()?.takeIf { it.isNotEmpty() }
     val resolvedVoice = resolveVoiceAlias(requestedVoice)

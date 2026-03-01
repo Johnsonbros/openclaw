@@ -34,7 +34,8 @@ export class AudioInputProcessor {
   ): void {
     this.log = ctx.logGateway;
 
-    const base64 = typeof obj.audio === "string" ? obj.audio : null;
+    // PendantAudioBridge sends the base64 PCM in "data"; accept "audio" as alias
+    const base64 = typeof obj.data === "string" ? obj.data : typeof obj.audio === "string" ? obj.audio : null;
     if (!base64) {
       return;
     }

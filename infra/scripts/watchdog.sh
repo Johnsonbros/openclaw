@@ -71,15 +71,22 @@ if ! docker ps --format '{{.Names}}' | grep -q '^openclaw-postgres$'; then
 fi
 
 # ── Gateway HTTP ────────────────────────────────────────────────
-if ! curl -sf --connect-timeout 5 http://localhost:18789/ >/dev/null 2>&1; then
-    log "Gateway not responding on :18789 — kickstarting service"
-    launchctl kickstart -k "gui/$(id -u)/ai.openclaw.gateway" 2>/dev/null
-    sleep 10
-    if curl -sf --connect-timeout 5 http://localhost:18789/ >/dev/null 2>&1; then
-        recovered "Gateway responding after kickstart"
+# Use a lockfile to avoid restart-looping: if we kickstarted recently, skip.
+GATEWAY_LOCK="$LOG_DIR/.watchdog-gateway-kick"
+if ! curl -so /dev/null --connect-timeout 5 http://localhost:18789/ >/dev/null 2>&1; then
+    # Check if gateway process is running (it may still be booting)
+    if launchctl list ai.openclaw.gateway 2>/dev/null | grep -q '"PID"'; then
+        log "Gateway not responding but process is running — waiting for boot"
+    elif [ -f "$GATEWAY_LOCK" ] && [ "$(( $(date +%s) - $(stat -f%m "$GATEWAY_LOCK" 2>/dev/null || echo 0) ))" -lt 120 ]; then
+        log "Gateway down but kickstarted <2min ago — waiting"
     else
-        log "WARN: Gateway still not responding after kickstart"
+        log "Gateway not responding on :18789 — kickstarting service"
+        launchctl kickstart "gui/$(id -u)/ai.openclaw.gateway" 2>/dev/null
+        touch "$GATEWAY_LOCK"
     fi
+else
+    # Gateway is healthy — clean up lockfile
+    rm -f "$GATEWAY_LOCK"
 fi
 
 # ── Node service ────────────────────────────────────────────────

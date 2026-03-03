@@ -1,5 +1,6 @@
 package ai.openclaw.android.ui
 
+import androidx.compose.ui.res.stringResource
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -322,7 +323,7 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
             color = onboardingAccent,
           )
           Text(
-            "OpenClaw\nMobile Setup",
+            "${stringResource(R.string.app_name)}\nMobile Setup",
             style = onboardingDisplayStyle.copy(lineHeight = 38.sp),
             color = onboardingText,
           )
@@ -352,7 +353,7 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                 qrScanLauncher.launch(
                   ScanOptions().apply {
                     setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                    setPrompt("Scan OpenClaw onboarding QR")
+                    setPrompt("Scan onboarding QR")
                     setBeepEnabled(false)
                     setOrientationLocked(false)
                   },

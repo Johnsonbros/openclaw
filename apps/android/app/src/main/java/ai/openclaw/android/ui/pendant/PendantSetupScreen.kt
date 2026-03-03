@@ -147,13 +147,20 @@ fun PendantSetupScreen(viewModel: MainViewModel) {
             val hasBle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
               ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-            } else true
+            } else {
+              // Pre-Android 12: BLE scanning requires ACCESS_FINE_LOCATION
+              ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            }
             if (hasBle) {
               if (!pendantEnabled) viewModel.setPendantEnabled(true)
               viewModel.startPendantScan()
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
               blePermissionLauncher.launch(
                 arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT),
+              )
+            } else {
+              blePermissionLauncher.launch(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
               )
             }
           },

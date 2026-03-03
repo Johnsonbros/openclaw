@@ -1,5 +1,6 @@
 package ai.openclaw.android.ui
 
+import ai.openclaw.android.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -229,7 +231,7 @@ private fun TopStatusBar(
       horizontalArrangement = Arrangement.SpaceBetween,
     ) {
       Text(
-        text = "OpenClaw",
+        text = stringResource(R.string.app_name),
         style = mobileTitle2,
         color = mobileText,
       )

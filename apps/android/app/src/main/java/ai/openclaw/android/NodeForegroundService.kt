@@ -95,7 +95,7 @@ class NodeForegroundService : Service() {
         "Connection",
         NotificationManager.IMPORTANCE_LOW,
       ).apply {
-        description = "OpenClaw node connection status"
+        description = "${getString(R.string.app_name)} node connection status"
         setShowBadge(false)
       }
     mgr.createNotificationChannel(channel)

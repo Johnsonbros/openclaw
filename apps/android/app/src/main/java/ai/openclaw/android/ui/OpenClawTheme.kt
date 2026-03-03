@@ -15,21 +15,16 @@ import ai.openclaw.android.BuildConfig
 private val aisyncDarkColorScheme = darkColorScheme(
   primary = Color(0xFF4FC3F7),
   secondary = Color(0xFF0F3460),
-  background = Color(0xFF1A1A2E),
-  surface = Color(0xFF16213E),
+  tertiary = Color(0xFF6366F1),
+  background = Color(0xFF0F172A),
+  surface = Color(0xFF1E293B),
+  surfaceVariant = Color(0xFF334155),
   onPrimary = Color.White,
-  onBackground = Color.White,
-  onSurface = Color.White,
-)
-
-private val aisyncLightColorScheme = lightColorScheme(
-  primary = Color(0xFF0F3460),
-  secondary = Color(0xFF4FC3F7),
-  background = Color(0xFFF5F5F5),
-  surface = Color.White,
-  onPrimary = Color.White,
-  onBackground = Color(0xFF1A1A2E),
-  onSurface = Color(0xFF1A1A2E),
+  onSecondary = Color.White,
+  onBackground = Color(0xFFF1F5F9),
+  onSurface = Color(0xFFF1F5F9),
+  onSurfaceVariant = Color(0xFF94A3B8),
+  error = Color(0xFFEF4444),
 )
 
 private val isAiSync: Boolean = BuildConfig.FLAVOR_brand == "aisync"
@@ -39,7 +34,7 @@ fun OpenClawTheme(content: @Composable () -> Unit) {
   val context = LocalContext.current
   val isDark = isSystemInDarkTheme()
   val colorScheme = when {
-    isAiSync -> if (isDark) aisyncDarkColorScheme else aisyncLightColorScheme
+    isAiSync -> aisyncDarkColorScheme // Always dark for AiSync
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
       if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
     else -> if (isDark) darkColorScheme() else lightColorScheme()

@@ -1,5 +1,6 @@
 package ai.openclaw.android.ui
 
+import ai.openclaw.android.R
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -51,6 +52,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
@@ -652,7 +654,7 @@ fun SettingsSheet(viewModel: MainViewModel) {
             modifier = Modifier.fillMaxWidth(),
             colors = listItemColors,
             headlineContent = { Text("While Using", style = mobileHeadline) },
-            supportingContent = { Text("Only while OpenClaw is open.", style = mobileCallout) },
+            supportingContent = { Text("Only while ${stringResource(R.string.app_name)} is open.", style = mobileCallout) },
             trailingContent = {
               RadioButton(
                 selected = locationMode == LocationMode.WhileUsing,
@@ -712,7 +714,7 @@ fun SettingsSheet(viewModel: MainViewModel) {
         modifier = settingsRowModifier(),
         colors = listItemColors,
         headlineContent = { Text("Prevent Sleep", style = mobileHeadline) },
-        supportingContent = { Text("Keeps the screen awake while OpenClaw is open.", style = mobileCallout) },
+        supportingContent = { Text("Keeps the screen awake while ${stringResource(R.string.app_name)} is open.", style = mobileCallout) },
         trailingContent = { Switch(checked = preventSleep, onCheckedChange = viewModel::setPreventSleep) },
       )
     }

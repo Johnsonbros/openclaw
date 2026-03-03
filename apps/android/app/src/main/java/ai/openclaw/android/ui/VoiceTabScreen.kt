@@ -1,5 +1,6 @@
 package ai.openclaw.android.ui
 
+import ai.openclaw.android.R
 import android.Manifest
 import android.app.Activity
 import android.content.Context
@@ -59,6 +60,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -490,7 +492,7 @@ private fun VoiceTurnBubble(entry: VoiceConversationEntry) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
       ) {
         Text(
-          if (isUser) "You" else "OpenClaw",
+          if (isUser) "You" else stringResource(R.string.brand_assistant_name),
           style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
           color = mobileTextSecondary,
         )
@@ -519,7 +521,7 @@ private fun VoiceThinkingBubble() {
         verticalAlignment = Alignment.CenterVertically,
       ) {
         ThinkingDots(color = mobileTextSecondary)
-        Text("OpenClaw is thinking…", style = mobileCallout, color = mobileTextSecondary)
+        Text("${stringResource(R.string.brand_assistant_name)} is thinking…", style = mobileCallout, color = mobileTextSecondary)
       }
     }
   }

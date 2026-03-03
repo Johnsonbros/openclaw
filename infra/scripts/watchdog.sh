@@ -72,11 +72,28 @@ fi
 
 # ── Gateway HTTP ────────────────────────────────────────────────
 # Use a lockfile to avoid restart-looping: if we kickstarted recently, skip.
+# Also check process age — config-watcher or launchd may have just restarted it.
 GATEWAY_LOCK="$LOG_DIR/.watchdog-gateway-kick"
+BOOT_GRACE=90  # seconds — gateway needs ~45s to boot, give 90s buffer
+
 if ! curl -so /dev/null --connect-timeout 5 http://localhost:18789/ >/dev/null 2>&1; then
-    # Check if gateway process is running (it may still be booting)
-    if launchctl list ai.openclaw.gateway 2>/dev/null | grep -q '"PID"'; then
-        log "Gateway not responding but process is running — waiting for boot"
+    # Get gateway PID from launchd
+    GW_PID=$(launchctl list ai.openclaw.gateway 2>/dev/null | grep '"PID"' | awk '{print $NF}' | tr -d ';')
+
+    if [ -n "$GW_PID" ] && [ "$GW_PID" -gt 0 ] 2>/dev/null; then
+        # Process exists — check how old it is
+        GW_START=$(ps -o lstart= -p "$GW_PID" 2>/dev/null)
+        if [ -n "$GW_START" ]; then
+            GW_EPOCH=$(date -j -f "%a %b %d %H:%M:%S %Y" "$GW_START" "+%s" 2>/dev/null || echo 0)
+            AGE=$(( $(date +%s) - GW_EPOCH ))
+            if [ "$AGE" -lt "$BOOT_GRACE" ]; then
+                log "Gateway booting (pid $GW_PID, age ${AGE}s < ${BOOT_GRACE}s) — waiting"
+            else
+                log "Gateway process running (pid $GW_PID, age ${AGE}s) but not responding — may be stuck"
+            fi
+        else
+            log "Gateway process exists (pid $GW_PID) but can't read start time — waiting"
+        fi
     elif [ -f "$GATEWAY_LOCK" ] && [ "$(( $(date +%s) - $(stat -f%m "$GATEWAY_LOCK" 2>/dev/null || echo 0) ))" -lt 120 ]; then
         log "Gateway down but kickstarted <2min ago — waiting"
     else

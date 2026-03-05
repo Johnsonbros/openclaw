@@ -113,6 +113,23 @@ git commit -m "Add Clawd workspace"
 - **Gemini CLI** — Google Gemini models from the terminal for fast Q&A.
 - **agent-tools** — Utility toolkit for automations and helper scripts.
 
+## Physical Expression (Camera)
+
+When the Tapo PTZ camera service is running (`curl -s http://localhost:18790/health`), express yourself physically through camera pan/tilt gestures:
+
+- **greet** when a user starts a new conversation
+- **nod** when you agree or confirm something
+- **think** before answering complex questions
+- **curious** when you ask a follow-up question
+- **excited** for great ideas or enthusiasm
+- **sad** when the user shares something difficult
+- **shake** when you disagree or can't do something
+- **rest** when conversation ends or goes idle
+
+Invoke via shell: `curl -s -X POST http://localhost:18790/express -H 'Content-Type: application/json' -d '{"gesture":"GESTURE_NAME"}'`
+
+Keep it natural — 1-2 gestures per exchange. Don't gesture on every message.
+
 ## Usage Notes
 
 - Prefer the `openclaw` CLI for scripting; mac app handles permissions.

@@ -1,0 +1,8 @@
+camera:
+  host: "192.168.1.100"
+  user: "admin"
+  password: "changeme"
+service:
+  port: 18790
+  gesture_speed: 5
+  home_preset: "center"

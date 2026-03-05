@@ -152,6 +152,26 @@
   z-index: 10;
 }
 
+/* Camera preview */
+.chat-camera-preview {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  overflow: hidden;
+  margin: 0 auto 8px;
+  border: 2px solid var(--accent, #4a9eff);
+}
+.chat-camera-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+.chat-camera-toggle.active {
+  color: var(--accent, #4a9eff);
+}
+
 /* Image attachments preview */
 .chat-attachments {
   display: inline-flex;

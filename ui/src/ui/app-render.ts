@@ -1,7 +1,7 @@
 import { html, nothing } from "lit";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
 import { t } from "../i18n/index.ts";
-import { refreshChatAvatar } from "./app-chat.ts";
+import { refreshChatAvatar, toggleCamera } from "./app-chat.ts";
 import { renderUsageTab } from "./app-render-usage-tab.ts";
 import { renderChatControls, renderTab, renderThemeToggle } from "./app-render.helpers.ts";
 import type { AppViewState } from "./app-view-state.ts";
@@ -1030,6 +1030,9 @@ export function renderApp(state: AppViewState) {
                 onDraftChange: (next) => (state.chatMessage = next),
                 attachments: state.chatAttachments,
                 onAttachmentsChange: (next) => (state.chatAttachments = next),
+                cameraEnabled: state.cameraEnabled,
+                cameraStream: state.cameraStream,
+                onCameraToggle: () => void toggleCamera(state),
                 onSend: () => state.handleSendChat(),
                 canAbort: Boolean(state.chatRunId),
                 onAbort: () => void state.handleAbortChat(),

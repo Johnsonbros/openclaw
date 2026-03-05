@@ -9,6 +9,7 @@ import type { GatewayHelloOk } from "./gateway.ts";
 import { normalizeBasePath } from "./navigation.ts";
 import type { ChatAttachment, ChatQueueItem } from "./ui-types.ts";
 import { generateUUID } from "./uuid.ts";
+import { openStream, closeStream, captureFrame, isStreamActive } from "./webcam-stream.ts";
 
 export type ChatHost = {
   connected: boolean;
@@ -22,6 +23,8 @@ export type ChatHost = {
   hello: GatewayHelloOk | null;
   chatAvatarUrl: string | null;
   refreshSessionsAfterChat: Set<string>;
+  cameraEnabled: boolean;
+  cameraStream: MediaStream | null;
 };
 
 export const CHAT_SESSIONS_ACTIVE_MINUTES = 120;
@@ -66,6 +69,23 @@ export async function handleAbortChat(host: ChatHost) {
   }
   host.chatMessage = "";
   await abortChatRun(host as unknown as OpenClawApp);
+}
+
+export async function toggleCamera(host: ChatHost) {
+  if (host.cameraEnabled) {
+    closeStream();
+    host.cameraEnabled = false;
+    host.cameraStream = null;
+  } else {
+    try {
+      const stream = await openStream();
+      host.cameraEnabled = true;
+      host.cameraStream = stream;
+    } catch {
+      host.cameraEnabled = false;
+      host.cameraStream = null;
+    }
+  }
 }
 
 function enqueueChatMessage(
@@ -167,7 +187,19 @@ export async function handleSendChat(
   const previousDraft = host.chatMessage;
   const message = (messageOverride ?? host.chatMessage).trim();
   const attachments = host.chatAttachments ?? [];
-  const attachmentsToSend = messageOverride == null ? attachments : [];
+  let attachmentsToSend = messageOverride == null ? attachments : [];
+
+  if (messageOverride == null && isStreamActive()) {
+    try {
+      const frame = await captureFrame({ maxWidth: 800, quality: 0.85 });
+      if (frame) {
+        attachmentsToSend = [...attachmentsToSend, { id: `cam-${Date.now()}`, dataUrl: frame.dataUrl, mimeType: frame.mimeType }];
+      }
+    } catch {
+      // Camera capture failed silently
+    }
+  }
+
   const hasAttachments = attachmentsToSend.length > 0;
 
   // Allow sending with just attachments (no message text required)

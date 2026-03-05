@@ -65,6 +65,10 @@ export type ChatProps = {
   // Image attachments
   attachments?: ChatAttachment[];
   onAttachmentsChange?: (attachments: ChatAttachment[]) => void;
+  // Camera
+  cameraEnabled: boolean;
+  cameraStream: MediaStream | null;
+  onCameraToggle: () => void;
   // Scroll control
   showNewMessages?: boolean;
   onScrollToBottom?: () => void;
@@ -421,6 +425,21 @@ export function renderChat(props: ChatProps) {
       }
 
       <div class="chat-compose">
+        ${props.cameraStream
+          ? html`<div class="chat-camera-preview">
+              <video
+                ${ref((el) => {
+                  if (el && el instanceof HTMLVideoElement && el.srcObject !== props.cameraStream) {
+                    el.srcObject = props.cameraStream;
+                    el.play();
+                  }
+                })}
+                muted
+                playsinline
+                autoplay
+              ></video>
+            </div>`
+          : nothing}
         ${renderAttachmentPreview(props)}
         <div class="chat-compose__row">
           <label class="field chat-compose__field">
@@ -458,6 +477,13 @@ export function renderChat(props: ChatProps) {
             ></textarea>
           </label>
           <div class="chat-compose__actions">
+            <button
+              class="btn chat-camera-toggle ${props.cameraEnabled ? 'active' : ''}"
+              title=${props.cameraEnabled ? "Turn off camera" : "Turn on camera"}
+              @click=${props.onCameraToggle}
+            >
+              cam
+            </button>
             <button
               class="btn"
               ?disabled=${!props.connected || (!canAbort && props.sending)}

@@ -76,7 +76,7 @@ class MoveRequest(BaseModel):
 async def _move(x: int, y: int, pause_ms: int = 200):
     """Execute a relative motor step and wait."""
     tapo = get_tapo()
-    tapo.moveMotorStep(x, y)
+    tapo.moveMotor(x, y)
     await asyncio.sleep(pause_ms / 1000)
 
 GESTURES: dict[str, list] = {

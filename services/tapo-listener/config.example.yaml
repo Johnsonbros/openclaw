@@ -1,0 +1,19 @@
+camera:
+  host: "192.168.1.100"
+  user: "admin"
+  password: "changeme"
+  rtsp_port: 554
+  stream: "stream1"
+whisper:
+  url: "http://localhost:8778"
+gateway:
+  url: "ws://127.0.0.1:18789"
+  token: "changeme"
+  session_key: "main"
+ptz:
+  url: "http://localhost:18791"
+service:
+  port: 18792
+  energy_threshold: 200
+  conversation_timeout: 30
+  wake_words: ["zeke"]

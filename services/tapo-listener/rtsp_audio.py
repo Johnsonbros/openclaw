@@ -33,8 +33,7 @@ class RtspAudioCapture:
             "-hide_banner", "-loglevel", "error",
             "-rtsp_transport", "tcp",
             "-i", self._rtsp_url,
-            "-map", "0:a",                  # select audio stream only (don't use -vn, camera rejects it)
-            "-acodec", "pcm_s16le",         # 16-bit PCM
+            "-acodec", "pcm_s16le",         # 16-bit PCM (no -vn or -map 0:a — camera rejects stream filtering)
             "-ar", str(SAMPLE_RATE),        # 16kHz
             "-ac", str(CHANNELS),           # mono
             "-f", "s16le",                  # raw PCM output

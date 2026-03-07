@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import shutil
+from urllib.parse import quote
 
 log = logging.getLogger("tapo-listener.rtsp")
 
@@ -15,7 +16,9 @@ CHUNK_BYTES = SAMPLE_RATE * SAMPLE_WIDTH * CHANNELS * CHUNK_DURATION_S  # 32000
 
 class RtspAudioCapture:
     def __init__(self, host: str, user: str, password: str, port: int = 554, stream: str = "stream1"):
-        self._rtsp_url = f"rtsp://{user}:{password}@{host}:{port}/{stream}"
+        safe_user = quote(user, safe="")
+        safe_pass = quote(password, safe="")
+        self._rtsp_url = f"rtsp://{safe_user}:{safe_pass}@{host}:{port}/{stream}"
         self._process: asyncio.subprocess.Process | None = None
         self._running = False
 

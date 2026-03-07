@@ -133,9 +133,44 @@ ws.on("message", (raw) => {
 
     // Agent events (tool use, thinking, etc.)
     if (evtName === "agent") {
-      const type = frame.payload?.type || "";
-      if (type === "tool_use") {
-        console.log(`\n[Tool: ${frame.payload?.name || "?"}]`);
+      const p = frame.payload || {};
+      const stream = p.stream || "";
+      const data = p.data || {};
+
+      // Lifecycle events
+      if (stream === "lifecycle") {
+        const phase = data.phase || data.type || "";
+        if (phase === "end" || phase === "error") {
+          // Agent run finished — if no chat text came, exit
+          if (!responseText) {
+            console.log("\n[Agent finished — no chat output]");
+          }
+        }
+      }
+
+      // Assistant text stream
+      if (stream === "assistant") {
+        const text = data.text || data.content || "";
+        if (text) {
+          process.stdout.write(text);
+          responseText += text;
+        }
+      }
+
+      // Tool events
+      if (stream === "tool") {
+        const name = data.name || data.tool || "";
+        const input = data.input;
+        const result = data.result;
+        if (name && !result) {
+          console.log(`\n[Tool: ${name}]`);
+          if (input && typeof input === "object" && input.command) {
+            console.log(`  $ ${input.command.substring(0, 200)}`);
+          }
+        }
+        if (result && typeof result === "string") {
+          console.log(`[Result: ${result.substring(0, 500)}]`);
+        }
       }
     }
   }

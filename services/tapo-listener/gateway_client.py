@@ -49,15 +49,26 @@ class GatewayClient:
             },
         }))
 
-        # Wait for hello-ok
-        raw = await asyncio.wait_for(self._ws.recv(), timeout=10)
-        frame = json.loads(raw)
-        if frame.get("type") == "res" and frame.get("ok"):
-            self._connected = True
-            log.info("Connected to gateway")
-        else:
-            error = frame.get("error", {}).get("message", "unknown")
-            raise ConnectionError(f"Gateway connect failed: {error}")
+        # Wait for hello-ok (skip connect.challenge and other events)
+        deadline = asyncio.get_event_loop().time() + 10
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise ConnectionError("Gateway connect timed out")
+            raw = await asyncio.wait_for(self._ws.recv(), timeout=remaining)
+            frame = json.loads(raw)
+            if frame.get("type") == "event":
+                log.debug("Skipping event during handshake: %s", frame.get("event"))
+                continue
+            if frame.get("type") == "res":
+                if frame.get("ok"):
+                    self._connected = True
+                    log.info("Connected to gateway")
+                    break
+                else:
+                    error = frame.get("error", {}).get("message", "unknown")
+                    raise ConnectionError(f"Gateway connect failed: {error}")
+            log.debug("Unexpected frame during handshake: %s", frame.get("type"))
 
         # Start background message reader
         asyncio.create_task(self._read_loop())

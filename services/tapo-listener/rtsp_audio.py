@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import shutil
 from urllib.parse import quote
 
@@ -30,7 +31,7 @@ class RtspAudioCapture:
         self._running = True
         self._process = await asyncio.create_subprocess_exec(
             ffmpeg,
-            "-hide_banner", "-loglevel", "error",
+            "-hide_banner", "-loglevel", "warning",
             "-rtsp_transport", "tcp",
             "-i", self._rtsp_url,
             "-acodec", "pcm_s16le",         # 16-bit PCM (no -vn or -map 0:a — camera rejects stream filtering)
@@ -39,7 +40,7 @@ class RtspAudioCapture:
             "-f", "s16le",                  # raw PCM output
             "pipe:1",
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=open(os.devnull, "w"),
         )
         log.info("RTSP audio capture started: %s", self._rtsp_url.split("@")[-1])
 
